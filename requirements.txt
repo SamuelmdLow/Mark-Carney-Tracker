@@ -8,6 +8,8 @@ certifi==2026.5.20
 cffi==2.0.0
 charset-normalizer==3.4.7
 Django==6.0.6
+django-filter==25.2
+djangorestframework==3.17.1
 flatbuffers==25.12.19
 frozenlist==1.8.0
 geographiclib==2.1
@@ -16,9 +18,11 @@ gitdb==4.0.12
 GitPython==3.1.41
 h3==4.5.0
 idna==3.18
+Markdown==3.10.2
 multidict==6.7.1
 numpy==2.4.6
 propcache==0.5.2
+psycopg2==2.9.12
 pycparser==3.0
 requests==2.34.2
 setuptools==78.1.1
