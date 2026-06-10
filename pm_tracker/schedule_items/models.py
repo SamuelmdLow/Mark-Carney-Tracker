@@ -9,8 +9,12 @@ from zoneinfo import ZoneInfo
 import aiohttp
 import asyncio
 
+from django.apps import apps
 from django.db import models
 from django.db.models import DateTimeField, CharField, IntegerField, FloatField, URLField, ForeignKey
+from django.contrib.contenttypes.models import ContentType
+
+from semantic_index.models import SemanticIndex
 
 # Create your models here.
 
@@ -207,3 +211,18 @@ class ScheduleItem(models.Model):
     source = URLField(max_length=511)
 
     objects = ScheduleItemManager()
+
+    def __str__(self) -> str:
+        return f'{self.datetime.strftime("%Y-%m-%d %H:%M")} - {self.content[:200]}'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        
+        schedule_item_content_type = ContentType.objects.get_for_model(self)
+        if SemanticIndex.objects.filter(content_type=schedule_item_content_type, object_id=self.id).exists():
+            SemanticIndex.objects.filter(content_type=schedule_item_content_type, object_id=self.id).delete()
+        SemanticIndex.objects.create(
+            content_object=self,
+            embedding=apps.get_app_config('semantic_index').model.encode(self.content),
+            datetime=self.datetime
+        )

@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     'schedule_items',
+    'attachments',
+    'semantic_index',
     'rest_framework',
 ]
 
