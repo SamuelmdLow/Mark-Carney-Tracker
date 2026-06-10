@@ -3,7 +3,7 @@ from django.db.models import JSONField, DateTimeField, ForeignKey, URLField, Cha
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from django.db.models import F, Q
-from django.db.models.functions import Extract
+from django.db.models.functions import Extract, Abs
 from pgvector.django import CosineDistance
 
 
@@ -22,7 +22,7 @@ import re
 class AttachmentManager(models.Manager):
     
     async def attach_to_schedule_item(self, contents, publish_time):
-        THRESHOLD = 100000
+        THRESHOLD = 0.6
 
         model = apps.get_app_config('semantic_index').model
 
@@ -42,23 +42,23 @@ class AttachmentManager(models.Manager):
                     datetime__gte=publish_time - datetime.timedelta(days=1)
                     ) \
                 .alias(
-                    time_proximity = Extract(F("datetime") - publish_time, "epoch"),
-                    cosine_similarity = CosineDistance("embedding", embedding)
+                    time_proximity = Abs(Extract(F("datetime") - publish_time, "epoch")),
+                    cosine_distance = CosineDistance("embedding", embedding)
                     ) \
                 .annotate(
-                    score=F("time_proximity") / (F("cosine_similarity") * F("cosine_similarity"))) \
-                .order_by("-score") \
+                    score=F("cosine_distance")) \
+                .order_by("score") \
                 .afirst()
         
         matches = await asyncio.gather(*[match_embedding(embedding) for embedding in embeddings])
 
-        best_match = max(matches, key=lambda match: match.score if match else float("-inf"))            
+        best_match = min(matches, key=lambda match: match.score if match else float("-inf"))            
 
         if not best_match:
             print("No matches found")
             return None
 
-        if best_match.score > THRESHOLD:
+        if best_match.score < THRESHOLD:
             best = await sync_to_async(lambda: best_match.content_object)()
             print(f"{best_match.score} {(publish_time-best_match.datetime).total_seconds() / (24 * 3600)}d\n        - {publish_time} - {best_match.datetime}\n        - {best.content}\n        - {" - ".join(contents)}\n")
             return best
@@ -79,7 +79,10 @@ class AttachmentManager(models.Manager):
 
             video_meta_element = soup.find("div", id="video-page-video")
             if video_meta_element and video_meta_element.has_attr("data-livedatetime"):
-                attachment_datetime = datetime.datetime.fromisoformat(video_meta_element["data-livedatetime"]).astimezone(datetime.timezone.utc)
+                last_modified = datetime.datetime.fromisoformat(video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
+                duration_text = video_meta_element["data-videoduration"].split(":")
+
+                attachment_datetime = last_modified - datetime.timedelta(seconds=int(duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
                 print(f"Updated publish time to {attachment_datetime} based on video metadata")
 
                 schedule_item = await self.attach_to_schedule_item([title, description], attachment_datetime)

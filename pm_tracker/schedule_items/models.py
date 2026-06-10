@@ -133,16 +133,18 @@ class ScheduleItemManager(models.Manager):
 
             timeText = " ".join([" ".join([string for string in s.stripped_strings]) for s in soup])
 
-            time = list(re.split(r'\s', timeText))
+            time_string = list(re.split(r'\s', timeText))
             try:
-                hours, minutes = map(int,time[0].split(":"))
-                if "p.m" in time[1]:
-                    hours + 12
+                hours, minutes = map(int,time_string[0].split(":"))
 
                 for s in soup:
                     s.decompose()
 
                 time = datetime.datetime(year=year, month=month, day=day, hour=hours, minute=minutes, tzinfo=tz)
+
+                if "p.m" in time_string[1]:
+                    time = time + datetime.timedelta(hours=12)
+
                 return time
             except:
                 print(f'TIME ERROR: {time} {day}/{month}/{year}')

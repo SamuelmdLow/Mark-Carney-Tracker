@@ -9,5 +9,5 @@ class LocationSerializer(serializers.ModelSerializer):
 class ScheduleItemSerializer(serializers.HyperlinkedModelSerializer):
     class Meta:
         model = ScheduleItem
-        fields = ["id", "content", "datetime", "location", "source"]
+        fields = ["id", "content", "datetime", "location", "source", "attachments"]
 

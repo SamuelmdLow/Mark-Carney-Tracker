@@ -19,10 +19,12 @@ from django.urls import path, include
 
 from rest_framework import routers
 from schedule_items.views import LocationViewSet, ScheduleItemsViewSet
+from attachments.views import AttachmentViewSet
 
 router = routers.DefaultRouter()
 router.register(r"locations", LocationViewSet)
 router.register(r"schedule_items", ScheduleItemsViewSet)
+router.register(r"attachments", AttachmentViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
