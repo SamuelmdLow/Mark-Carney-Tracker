@@ -1,3 +1,4 @@
+from certifi import contents
 from django.db import models
 from django.db.models import JSONField, DateTimeField, ForeignKey, URLField, CharField
 from django.contrib.contenttypes.models import ContentType
@@ -22,8 +23,6 @@ import re
 class AttachmentManager(models.Manager):
     
     async def attach_to_schedule_item(self, contents, publish_time):
-        THRESHOLD = 0.6
-
         model = apps.get_app_config('semantic_index').model
 
         # convert sentences to embeddings
@@ -58,6 +57,10 @@ class AttachmentManager(models.Manager):
             print("No matches found")
             return None
 
+        THRESHOLD = 0.6
+        if "carney" not in "".join(contents).lower():
+            THRESHOLD = 0.5
+
         if best_match.score < THRESHOLD:
             best = await sync_to_async(lambda: best_match.content_object)()
             print(f"{best_match.score} {(publish_time-best_match.datetime).total_seconds() / (24 * 3600)}d\n        - {publish_time} - {best_match.datetime}\n        - {best.content}\n        - {" - ".join(contents)}\n")
@@ -70,7 +73,6 @@ class AttachmentManager(models.Manager):
             if response.status != 200:
                 print(f"Failed to fetch {url} with status code {response.status}")
                 return None
-            print(f"Scraping {url}")
             page_html = await response.text()
             soup = BeautifulSoup(page_html, "html.parser")
             title = soup.find("meta", property="og:title")["content"]
@@ -79,18 +81,21 @@ class AttachmentManager(models.Manager):
 
             video_meta_element = soup.find("div", id="video-page-video")
             if video_meta_element and video_meta_element.has_attr("data-livedatetime"):
-                last_modified = datetime.datetime.fromisoformat(video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
+                day_published = datetime.datetime.fromisoformat(video_meta_element["data-livedatetime"]).astimezone(datetime.timezone.utc)
+                
+                attachment_datetime = datetime.datetime.fromisoformat(video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
+                
                 duration_text = video_meta_element["data-videoduration"].split(":")
+                if len(duration_text) == 3:
+                    attachment_datetime = attachment_datetime - datetime.timedelta(seconds=int(duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
 
-                attachment_datetime = last_modified - datetime.timedelta(seconds=int(duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
-                print(f"Updated publish time to {attachment_datetime} based on video metadata")
+                if abs((attachment_datetime - day_published).total_seconds()) > 24 * 3600:
+                    # Use 'data-livedatetime' if 'data-lastdatemodified' is more than 24 hours separated
+                    attachment_datetime = day_published
 
                 schedule_item = await self.attach_to_schedule_item([title, description], attachment_datetime)
 
-                if schedule_item:
-                    print(f"Match '{title}' to schedule item '{schedule_item}' with id {schedule_item.id}")
-
-                else:
+                if not schedule_item:
                     # Replace with creation of schedule item from attachment content
                     return None
 
@@ -153,7 +158,32 @@ class AttachmentManager(models.Manager):
                         return False
                     necessary_terms = ["carney", "headline-politics"]
                     
-                    return all(term in url.find("loc").text for term in necessary_terms)
+                    if all(term in url.find("loc").text for term in necessary_terms):
+                        return True
+                    
+                    THRESHOLD = 0.56
+
+                    model = apps.get_app_config('semantic_index').model
+                    
+                    url_text = url.find("loc").text
+                    en_url = url.find("xhtml:link", {"hreflang": "en"})
+                    if not en_url:
+                        return False
+
+                    if url_text == en_url["href"]:
+                        title_from_url = url_text.split("/")[-1].split("?")[0].replace("-", " ")
+                        embedding = model.encode([title_from_url])
+
+                        schedule_item_content_type = await sync_to_async(ContentType.objects.get_for_model)(ScheduleItem)
+                        
+                        potential_match = SemanticIndex.objects.alias(
+                                cosine_distance=CosineDistance("embedding", embedding[0])) \
+                            .filter(
+                                content_type=schedule_item_content_type, cosine_distance__lt=THRESHOLD)
+                        
+                        return await potential_match.aexists()
+                    
+                    return False
                         
                 def extract_url_info(url):
                     return url.find("loc").text
