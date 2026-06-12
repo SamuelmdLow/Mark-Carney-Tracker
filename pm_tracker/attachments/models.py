@@ -1,4 +1,3 @@
-from certifi import contents
 from django.db import models
 from django.db.models import JSONField, DateTimeField, ForeignKey, URLField, CharField
 from django.contrib.contenttypes.models import ContentType
@@ -18,10 +17,69 @@ from asgiref.sync import async_to_sync, sync_to_async
 import datetime
 import re
 
+import ffmpeg
+#from speechbrain.inference.separation import SepformerSeparation
+
 # Create your models here.
 
 class AttachmentManager(models.Manager):
     
+    async def mine_audio(self, audio):
+        pass
+        #SepformerSeparation.
+
+    async def m3u8_extract(self, m3u8_url):
+        '''
+        Strings together audio from m3u8 file, extracts transcript annotated by speaker and language.  
+        '''
+        async with aiohttp.ClientSession() as session:
+            async with session.get(m3u8_url) as response:
+                m3u8_lines = (await response.text()).split("\n")
+
+                tag_marker = "#EXT"
+
+                tags = list(filter(lambda l: l[:len(tag_marker)] == tag_marker and ':' in l, m3u8_lines))
+
+                def read_params(line):
+                    result = {}
+                    pairs = line.split(",")
+                    for pair in map(lambda pair: pair.split("="), pairs):
+                        if len(pair) >= 2:
+                            result[pair[0]] = "=".join(pair[1:])
+                    return result
+
+                tags = list(map(lambda l: read_params(l.split(":")[1]), tags))
+                
+                return tags 
+    
+    async def m3u8_concat_audio(self, m3u8_url_base, m3u8_tags):
+        '''
+        Concat audio files from m3u8 and return transcript
+        '''
+        audios = filter(lambda l: "TYPE" in l and l["TYPE"]=="AUDIO", m3u8_tags)
+        floor_audios = list(filter(lambda l: l["NAME"]=='"Floor"', audios))
+        
+        if len(floor_audios) == 0:
+            return None
+
+        floor_audio = floor_audios[0]
+        floor_audio_url = m3u8_url_base + floor_audio['URI'].replace('"', '')
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(floor_audio_url) as response:
+                audio_lines = (await response.text()).split("\n#")
+
+                clip_marker = 'EXTINF'
+                clips = filter(lambda l: l[:len(clip_marker)]== clip_marker, audio_lines)
+                clip_urls = map(lambda l: m3u8_url_base + l.split('\n')[1], clips)
+                clip_audios = list(map(lambda url: ffmpeg.input(url), clip_urls))
+
+                return (
+                    ffmpeg
+                    .concat(*clip_audios, v=0, a=1)
+                )
+
+
     async def attach_to_schedule_item(self, contents, publish_time):
         model = apps.get_app_config('semantic_index').model
 

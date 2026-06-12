@@ -12,4 +12,5 @@ ENV PYTHONUNBUFFERED 1
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
 
-
+RUN sudo apt update
+RUN sudo apt-get install ffmpeg 
