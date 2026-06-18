@@ -6,9 +6,10 @@ from django.db.models import F, Q
 from django.db.models.functions import Extract, Abs
 from pgvector.django import CosineDistance
 
-
 from schedule_items.models import ScheduleItem
 from semantic_index.models import SemanticIndex
+
+from celery import chain
 
 from bs4 import BeautifulSoup
 import aiohttp
@@ -37,6 +38,20 @@ class Attachment(models.Model):
     source = URLField(max_length=511)
 
     objects = AttachmentManager()
+
+    def save(self, *args, **kwargs):
+        from attachments.tasks import populate_attachment_data, index_attachment
+
+        is_new = self._state.adding
+        result = super().save(*args, **kwargs)
+        
+        if is_new:
+            chain(
+                populate_attachment_data.delay_on_commit(self.pk),
+                index_attachment.delay_on_commit(self.pk)
+            )()
+
+        return result
 
     def index(self):
         from attachments.services import resegment_transcript_for_embedding

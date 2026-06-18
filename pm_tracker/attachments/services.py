@@ -126,8 +126,7 @@ def transcribe_audio(audio):
 
     return transcription
 
-def populate_attachment_data(attachment_pk):
-    attachment = Attachment.objects.get(pk=attachment_pk)
+def populate_attachment_data(attachment):
     
     data = json.load(attachment.json)
 

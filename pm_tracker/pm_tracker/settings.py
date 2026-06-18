@@ -144,3 +144,6 @@ REST_FRAMEWORK = {
 
 
 HUGGINGFACE_ACCESS_TOKEN = env('HUGGINGFACE_ACCESS_TOKEN')
+
+# Celery configuration
+CELERY_BROKER_URL = 'redis://localhost:6379/0'

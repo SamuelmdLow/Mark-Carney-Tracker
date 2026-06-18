@@ -120,6 +120,7 @@ python-dateutil==2.9.0.post0
 pytorch-lightning==2.6.5
 pytorch-metric-learning==2.9.0
 PyYAML==6.0.3
+redis==6.4.0
 regex==2026.5.9
 requests==2.34.2
 rich==15.0.0
