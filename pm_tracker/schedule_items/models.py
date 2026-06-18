@@ -1,20 +1,23 @@
-import requests
-from bs4 import BeautifulSoup
-import json
-import re
-from geopy.geocoders import Nominatim
-from timezonefinder import TimezoneFinder
-import datetime
-from zoneinfo import ZoneInfo
-import aiohttp
-import asyncio
-
 from django.apps import apps
 from django.db import models
 from django.db.models import DateTimeField, CharField, IntegerField, FloatField, URLField, ForeignKey
 from django.contrib.contenttypes.models import ContentType
+from django.db.models import F
+from django.db.models.functions import Extract, Abs
+from pgvector.django import CosineDistance
 
 from semantic_index.models import SemanticIndex
+
+from geopy.geocoders import Nominatim
+from timezonefinder import TimezoneFinder
+from zoneinfo import ZoneInfo
+
+import datetime
+from bs4 import BeautifulSoup
+import re
+import aiohttp
+import asyncio
+from asgiref.sync import sync_to_async
 
 # Create your models here.
 
@@ -59,6 +62,56 @@ class Location(models.Model):
 
 class ScheduleItemManager(models.Manager):
     
+    async def get_time_relevant(contents:list[str], publish_time:datetime.datetime) -> (None | ScheduleItem):
+        '''
+        Find the most relevant ScheduleItem object based on contents and publish_time
+
+        Returns ScheduleItem object or None
+        '''
+
+        model = apps.get_app_config('semantic_index').model
+
+        schedule_item_content_type = await sync_to_async(ContentType.objects.get_for_model)(ScheduleItem)
+
+        embeddings = model.encode(contents)
+
+        async def match_embedding(embedding):
+            return await SemanticIndex.objects \
+                .filter(
+                    content_type=schedule_item_content_type,
+                    datetime__lte=publish_time + datetime.timedelta(days=1),
+                    datetime__gte=publish_time - datetime.timedelta(days=1)
+                ) \
+                .alias(
+                    time_proximity=Abs(
+                        Extract(F("datetime") - publish_time, "epoch")),
+                    cosine_distance=CosineDistance("embedding", embedding)
+                ) \
+                .annotate(
+                    score=F("cosine_distance")) \
+                .order_by("score") \
+                .afirst()
+
+        matches = await asyncio.gather(*[match_embedding(embedding) for embedding in embeddings])
+
+        best_match = min(
+            matches, key=lambda match: match.score if match else float("-inf"))
+
+        if not best_match:
+            print("No matches found")
+            return None
+
+        THRESHOLD = 0.6
+        if "carney" not in "".join(contents).lower():
+            THRESHOLD = 0.5
+
+        if best_match.score < THRESHOLD:
+            best = await sync_to_async(lambda: best_match.content_object)()
+            print(f"{best_match.score} {(publish_time-best_match.datetime).total_seconds() / (24 * 3600)}d\n        - {publish_time} - {best_match.datetime}\n        - {best.content}\n        - {" - ".join(contents)}\n")
+            return best
+
+        return None
+
     async def pm_website_get_index_page_HTML(self, page, session):
         async with session.post(
             "https://www.pm.gc.ca/views/ajax", 
