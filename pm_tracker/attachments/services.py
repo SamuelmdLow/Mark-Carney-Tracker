@@ -24,7 +24,7 @@ import numpy as np
 
 class M3U8():
 
-    async def load(self, m3u8_url_base:str) -> M3U8:
+    async def aload(self, m3u8_url_base:str) -> M3U8:
         '''
         Sets up a M3U8 object from a m3u8_url
         '''
@@ -55,8 +55,11 @@ class M3U8():
                 self.tags = tags
 
                 return self
+            
+    def load(self, m3u8_url_base:str) -> M3U8:
+        return async_to_sync(self.aload)(m3u8_url_base)
 
-    async def get_audio(self, name=None, sample_rate=16000):
+    async def aget_audio(self, name=None, sample_rate=16000):
         '''
         Get, concat, and return audio listed in m3u8 file
         '''
@@ -93,6 +96,8 @@ class M3U8():
 
                 return out
 
+    def get_audio(self, name=None, sample_rate=16000):
+        return async_to_sync(self.aget_audio)(name=name, sample_rate=sample_rate)
 
 def transcribe_audio(audio):
 
@@ -115,8 +120,6 @@ def transcribe_audio(audio):
             "text": segment["text"],
             "words": map(reduce_words, segment["words"])
         }
-    
-    text = result['text']
 
     transcription = {
         "version": 0.01,
@@ -128,18 +131,19 @@ def transcribe_audio(audio):
 
 def populate_attachment_data(attachment):
     
-    data = json.load(attachment.json)
+    data = attachment.json
 
     if "video_m3u8" in data:
         m3u8_base_url = data['video_m3u8']
 
-        m3u8 = M3U8() 
-        audio = async_to_sync(m3u8.load(m3u8_base_url).get_audio)()
+        m3u8 = M3U8()
+        m3u8.load(m3u8_base_url) 
+        audio = m3u8.get_audio()
         transcription = transcribe_audio(audio)
 
         data['transcription'] = transcription
 
-        attachment.json = json.dump(data)
+        attachment.json = data
 
     attachment.save()
     return attachment
@@ -322,7 +326,7 @@ async def cpac_create_attachments_from_urls(urls:list[str]) -> list[Attachment]:
 
         attachments = filter(lambda a: a is not None, attachments)
 
-        return await Attachment.objects.abulk_create(attachments)
+        return await sync_to_async(Attachment.objects.bulk_create_and_index)(attachments)
 
 
 async def cpac_scrape_all():
@@ -337,7 +341,7 @@ async def cpac_scrape_all():
     for sitemap_url in sitemap_urls:
         urls += await cpac_sitemap_get_relevant_urls(sitemap_url)
 
-    cpac_create_attachments_from_urls(urls)
+    await cpac_create_attachments_from_urls(urls)
 
 
 async def cpac_scrape_recent():
@@ -346,9 +350,10 @@ async def cpac_scrape_recent():
     '''
     CUTOFF_DATE = datetime.datetime(
         year=2025, month=4, day=1, tzinfo=datetime.timezone.utc)
+    
     sitemap_urls = await cpac_read_sitemap_index(CUTOFF_DATE)
 
     if sitemap_urls:
         urls = await cpac_sitemap_get_relevant_urls(sitemap_urls[0])
 
-        cpac_create_attachments_from_urls(urls)
+        await cpac_create_attachments_from_urls(urls)

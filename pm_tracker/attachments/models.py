@@ -9,7 +9,7 @@ from pgvector.django import CosineDistance
 from schedule_items.models import ScheduleItem
 from semantic_index.models import SemanticIndex
 
-from celery import chain
+from celery import chord
 
 from bs4 import BeautifulSoup
 import aiohttp
@@ -27,7 +27,16 @@ import numpy as np
 # Create your models here.
 
 class AttachmentManager(models.Manager):
-    pass
+    
+    def bulk_create_and_index(self, objects):
+        from attachments.tasks import populate_attachment_data_task, index_attachment
+
+        attachments = Attachment.objects.bulk_create(objects)
+        
+        for attachment in attachments:
+            populate_attachment_data_task.delay_on_commit(attachment.pk)
+            
+        return attachments
 
 class Attachment(models.Model):
     schedule_item = ForeignKey('schedule_items.ScheduleItem', on_delete=models.CASCADE, related_name='attachments')
@@ -38,20 +47,6 @@ class Attachment(models.Model):
     source = URLField(max_length=511)
 
     objects = AttachmentManager()
-
-    def save(self, *args, **kwargs):
-        from attachments.tasks import populate_attachment_data, index_attachment
-
-        is_new = self._state.adding
-        result = super().save(*args, **kwargs)
-        
-        if is_new:
-            chain(
-                populate_attachment_data.delay_on_commit(self.pk),
-                index_attachment.delay_on_commit(self.pk)
-            )()
-
-        return result
 
     def index(self):
         from attachments.services import resegment_transcript_for_embedding

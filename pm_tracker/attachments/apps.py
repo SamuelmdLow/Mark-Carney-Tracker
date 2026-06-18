@@ -2,8 +2,16 @@ from django.apps import AppConfig
 
 class AttachmentsConfig(AppConfig):
     name = "attachments"
-    model = None
+    _transcription_model = None
 
     def ready(self):
-        import whisper
-        self.transcription_model = whisper.load_model('turbo')
+        import torch
+        torch.set_num_threads(1)
+
+    @property
+    def transcription_model(self):
+        if not self._transcription_model: 
+            import whisper
+            self._transcription_model = whisper.load_model('turbo')           
+        
+        return self._transcription_model
