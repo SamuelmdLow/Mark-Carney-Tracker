@@ -118,13 +118,13 @@ def transcribe_audio(audio):
             "start": segment["start"],
             "end": segment["end"],
             "text": segment["text"],
-            "words": map(reduce_words, segment["words"])
+            "words": list(map(reduce_words, segment["words"]))
         }
 
     transcription = {
         "version": 0.01,
-        "transcribed_at": datetime.datetime.now(),
-        "segments": map(reduce_segment, result["segments"])
+        "transcribed_at": str(datetime.datetime.now()),
+        "segments": list(map(reduce_segment, result["segments"]))
     }
 
     return transcription
@@ -160,10 +160,10 @@ def resegment_transcript_for_embedding(segments):
 
     gap_scores = []
     for i in range(len(segments) - 1):
-        time_gap = np.log(segments[i+1]["start"] - segments[i]["end"])
+        time_gap = np.max([0.01, segments[i+1]["start"] - segments[i]["end"]])
         semantic_gap = 1 - model.similarity(embeddings[i+1], embeddings[i]).tolist()[0][0]
         
-        gap_scores.append(time_gap * semantic_gap)
+        gap_scores.append(np.log(time_gap) * semantic_gap)
 
     max_seq_length = model.max_seq_length
     def split_gaps(gaps, segments):

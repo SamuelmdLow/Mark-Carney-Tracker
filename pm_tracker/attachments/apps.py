@@ -12,6 +12,6 @@ class AttachmentsConfig(AppConfig):
     def transcription_model(self):
         if not self._transcription_model: 
             import whisper
-            self._transcription_model = whisper.load_model('turbo')           
+            self._transcription_model = whisper.load_model('tiny')           
         
         return self._transcription_model
