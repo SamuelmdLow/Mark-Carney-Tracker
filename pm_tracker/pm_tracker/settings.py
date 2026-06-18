@@ -87,7 +87,7 @@ DATABASES = {
         'NAME': env('DB_NAME'),
         'USER': env('DB_USER'),
         'PASSWORD': env('DB_PASSWORD'),
-        "HOST": "127.0.0.1",
+        "HOST": env('DB_HOST'),
         "PORT": "5432",
     }
 }
@@ -146,4 +146,4 @@ REST_FRAMEWORK = {
 HUGGINGFACE_ACCESS_TOKEN = env('HUGGINGFACE_ACCESS_TOKEN')
 
 # Celery configuration
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_BROKER_URL = 'redis://redis:6379/0'

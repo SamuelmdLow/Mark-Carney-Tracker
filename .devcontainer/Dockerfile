@@ -13,4 +13,4 @@ ENV PYTHONUNBUFFERED 1
 
 
 RUN sudo apt-get update
-RUN sudo apt-get install ffmpeg 
+RUN sudo apt-get install -y ffmpeg 
