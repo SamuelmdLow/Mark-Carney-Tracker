@@ -45,9 +45,10 @@ INSTALLED_APPS = [
     'schedule_items',
     'attachments',
     'semantic_index',
-    
+
     'rest_framework',
     'generic_relations',
+    "graphene_django"
 ]
 
 MIDDLEWARE = [
@@ -144,6 +145,10 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
     'PAGE_SIZE': 100
+}
+
+GRAPHENE = {
+    "SCHEMA": "pm_tracker.schema.schema"
 }
 
 

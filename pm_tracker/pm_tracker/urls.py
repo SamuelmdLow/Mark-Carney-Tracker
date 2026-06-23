@@ -16,8 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.views.decorators.csrf import csrf_exempt
 
 from rest_framework import routers
+from graphene_django.views import GraphQLView
+
 from schedule_items.views import LocationViewSet, ScheduleItemsViewSet
 from attachments.views import AttachmentViewSet
 from semantic_index.views import SemanticIndexViewSet
@@ -32,4 +35,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path("", include(router.urls)),
     path("api-auth/", include("rest_framework.urls")),
+
+    path("graphql", csrf_exempt(GraphQLView.as_view(graphiql=True))),
 ]
