@@ -48,6 +48,9 @@ class Attachment(models.Model):
 
     objects = AttachmentManager()
 
+    def __str__(self):
+        return self.title
+
     def index(self):
         from attachments.services import resegment_transcript_for_embedding
 
@@ -58,16 +61,19 @@ class Attachment(models.Model):
         model = apps.get_app_config('semantic_index').model
 
         text_segments = [self.title, self.content]
+        labels = 2 * [SemanticIndex.SourceType.META_DESCRIPTOR]
 
         data = self.json
         if "transcription" in data:
-            text_segments += resegment_transcript_for_embedding(data["transcription"]["segments"])
-            
+            text_segments += resegment_transcript_for_embedding(data["transcription"]["segments"])        
+            labels += len(data["transcription"]["segments"]) * [SemanticIndex.SourceType.TRANSCRIPT]
+
         embeddings = model.encode(text_segments).tolist()
             
         SemanticIndex.objects.bulk_create([
             SemanticIndex(
-                content_object=self,
                 embedding=embedding,
-                datetime=self.published_at
-            ) for embedding in embeddings])
+                body=text,
+                datetime=self.published_at,
+                content_object=self,
+            ) for (text, embedding) in list(zip(text_segments, embeddings))])

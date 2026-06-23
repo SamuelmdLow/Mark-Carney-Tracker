@@ -149,9 +149,11 @@ def populate_attachment_data(attachment):
     return attachment
 
 def resegment_transcript_for_embedding(segments):
+    MIN_SEGMENT_LENGTH = 15
+
     model = apps.get_app_config('semantic_index').model
 
-    segments = list(copy.deepcopy(segments))
+    segments = list(filter(lambda s: len(s["text"]) > MIN_SEGMENT_LENGTH, copy.deepcopy(segments)))
 
     embeddings = model.encode([segment["text"] for segment in segments])
 

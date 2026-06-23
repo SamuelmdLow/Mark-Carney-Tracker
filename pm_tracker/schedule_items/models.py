@@ -134,8 +134,11 @@ class ScheduleItem(models.Model):
 
         SemanticIndex.objects.filter(content_type=schedule_item_content_type, object_id=self.id).delete()
 
+        model = apps.get_app_config('semantic_index').model
+
         SemanticIndex.objects.create(
+            embedding=model.encode(self.content),
+            body=self.content,
+            datetime=self.datetime,
             content_object=self,
-            embedding=apps.get_app_config('semantic_index').model.encode(self.content),
-            datetime=self.datetime
         )
