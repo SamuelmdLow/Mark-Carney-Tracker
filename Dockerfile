@@ -6,4 +6,3 @@ RUN sudo apt-get update
 RUN sudo apt-get install -y ffmpeg 
 
 COPY . .
-RUN pip install -r requirements.txt
