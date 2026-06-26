@@ -26,4 +26,4 @@ RUN sudo apt-get install -y ffmpeg
 
 EXPOSE 8000
 
-ENTRYPOINT ["gnuicorn", "pm_tracker:wsgi:application", "--bind", "0.0.0.0:8000"]
+ENTRYPOINT ["gunicorn", "pm_tracker:wsgi:application", "--bind", "0.0.0.0:8000"]
