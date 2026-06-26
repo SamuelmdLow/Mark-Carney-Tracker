@@ -37,7 +37,19 @@ jobs:
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # list of Docker images to use as base name for tags
+          images: |
+            samuelmdlow/mark-carney-tracker
+            ghcr.io/samuelmdlow/mark-carney-tracker
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
       
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
