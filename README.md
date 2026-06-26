@@ -2,7 +2,7 @@
 The purpose of this project is to make the activities and statements of the Prime Minister easier to follow and search.
 
 ## What it does
-The project parses the Prime Minister's media advisory pages and saves their information in its database. Videos from cpac.ca which are deemed relevant to a schedule item are transcribed and also saved in the database. Everything is then indexed with an embedding to allow for semantic search.
+The project parses the Prime Minister's media advisory pages and saves their information in its database. Videos from cpac.ca which are deemed relevant to an item in his schedule are transcribed and also saved in the database. Everything is then indexed with an embedding to allow for semantic search.
 
 The information can be accessed, filtered, and searched using a REST api or with GraphQL.
 
