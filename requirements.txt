@@ -47,6 +47,7 @@ graphql-core==3.2.11
 graphql-relay==3.2.0
 greenlet==3.5.1
 grpcio==1.81.1
+gunicorn==26.0.0
 h11==0.16.0
 h3==4.5.0
 hf-xet==1.5.1

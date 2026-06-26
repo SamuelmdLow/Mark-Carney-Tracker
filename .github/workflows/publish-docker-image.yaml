@@ -39,7 +39,6 @@ jobs:
         with:
           # list of Docker images to use as base name for tags
           images: |
-            samuelmdlow/mark-carney-tracker
             ghcr.io/samuelmdlow/mark-carney-tracker
           # generate Docker tags based on the following events/attributes
           tags: |
