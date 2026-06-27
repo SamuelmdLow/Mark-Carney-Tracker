@@ -1,3 +1,4 @@
 pm_tracker/ml_models/*
 !**/README.md
 pm_tracker/.env
+pm_tracker/static/*

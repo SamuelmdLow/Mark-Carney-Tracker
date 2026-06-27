@@ -3,9 +3,6 @@ ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
 
-#COPY --from=builder /venv /venv
-#ENV PATH="/venv/bin:$PATH"
-
 COPY . .
 
 RUN sudo apt-get update
