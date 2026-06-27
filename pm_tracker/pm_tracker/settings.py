@@ -29,8 +29,11 @@ DEBUG = env('DEBUG')
 
 SECRET_KEY = env('SECRET_KEY')
 
-ALLOWED_HOSTS = [env('HTTP_HOST'), 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = []
+if env('HTTP_HOST', default=False):
+    ALLOWED_HOSTS = [env('HTTP_HOST'), 'localhost', '127.0.0.1']
 
+USE_X_FORWARDED_HOST = env('USE_X_FORWARDED_HOST', default=False)
 
 # Application definition
 
