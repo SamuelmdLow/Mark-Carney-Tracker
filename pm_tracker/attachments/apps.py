@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.apps import AppConfig
 
 class AttachmentsConfig(AppConfig):
@@ -12,6 +13,6 @@ class AttachmentsConfig(AppConfig):
     def transcription_model(self):
         if not self._transcription_model: 
             import whisper
-            self._transcription_model = whisper.load_model('tiny')           
+            self._transcription_model = whisper.load_model(settings.WHISPER_MODEL)           
         
         return self._transcription_model
