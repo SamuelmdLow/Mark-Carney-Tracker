@@ -25,9 +25,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Take environment variables from .env file
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
-DEBUG = env('DEBUG')
+DEBUG = env('DEBUG', default=False)
 
-SECRET_KEY = env('SECRET_KEY')
+SECRET_KEY = env('SECRET_KEY', default="SOMETHING_SILLY")
 
 ALLOWED_HOSTS = [env('HTTP_HOST', default='localhost'), 'localhost', '127.0.0.1']
 
@@ -88,10 +88,10 @@ WSGI_APPLICATION = 'pm_tracker.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': env('DB_NAME'),
-        'USER': env('DB_USER'),
-        'PASSWORD': env('DB_PASSWORD'),
-        "HOST": env('DB_HOST'),
+        'NAME': env('DB_NAME', default="postgres"),
+        'USER': env('DB_USER', default="postgres"),
+        'PASSWORD': env('DB_PASSWORD', default="postgres"),
+        "HOST": env('DB_HOST', default="db"),
         "PORT": "5432",
     }
 }
@@ -132,7 +132,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-STATIC_ROOT = env('STATIC_ROOT')
+STATIC_ROOT = env('STATIC_ROOT', default="static/")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -154,8 +154,8 @@ GRAPHENE = {
 }
 
 
-HUGGINGFACE_ACCESS_TOKEN = env('HUGGINGFACE_ACCESS_TOKEN')
-WHISPER_MODEL = env('WHISPER_MODEL')
+HUGGINGFACE_ACCESS_TOKEN = env('HUGGINGFACE_ACCESS_TOKEN', default=None)
+WHISPER_MODEL = env('WHISPER_MODEL', default="base")
 
 # Celery configuration
 CELERY_BROKER_URL = 'redis://redis:6379/0'

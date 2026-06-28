@@ -190,10 +190,30 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
         
         items = await readItems(soup, dmy)
 
-        await ScheduleItem.objects.filter(source=url).adelete()
-        
-        return await sync_to_async(ScheduleItem.objects.bulk_create_and_index)(items)
+        unchangedItemsIds = []
+        newItems = []
+        for item in items:
+            match = await ScheduleItem.objects \
+                .filter(
+                    source=item.source,
+                    datetime=item.datetime,
+                    location=item.location,
+                    content=item.content) \
+                .afirst()
+            if match:
+                unchangedItemsIds.append(match.pk)
+            else:
+                newItems.append(item)
 
+        # delete items created from the source url that have been changed or deleted since last scrape (if any)
+        deleted = await ScheduleItem.objects.filter(source=url).exclude(pk__in=unchangedItemsIds).adelete()
+        
+        # create items that are new or have been changed since last scrape (if any)
+        created = await sync_to_async(ScheduleItem.objects.bulk_create_and_index)(newItems)
+
+        #print(f"{url}\n     - preserved {len(unchangedItemsIds)}\n     - created {len(created)}\n     - deleted {deleted[0]}")
+
+        return created
 
 async def pm_website_create_all():
     '''
@@ -202,6 +222,18 @@ async def pm_website_create_all():
     async with aiohttp.ClientSession() as session:
 
         ids = await pm_website_get_all_ids(session)
+
+        tasks = [pm_website_create_schedule_items_from_page(
+            id, session) for id in ids]
+        await asyncio.gather(*tasks)
+
+async def pm_website_scrape_recent():
+    '''
+    Find all media advisory pages and save ScheduleItems from the content 
+    '''
+    async with aiohttp.ClientSession() as session:
+
+        ids = await pm_website_get_ids_from_index(1, session)
 
         tasks = [pm_website_create_schedule_items_from_page(
             id, session) for id in ids]
