@@ -385,7 +385,7 @@ async def cpac_scrape_recent():
     Scrape most recent sitemap and create attachments for any new Mark Carney interviews
     '''
     CUTOFF_DATE = datetime.datetime.now(
-        tzinfo=datetime.timezone.utc) - datetime.timedelta(days=7)
+        tz=datetime.timezone.utc) - datetime.timedelta(days=7)
 
     sitemap_urls = await cpac_read_sitemap_index(CUTOFF_DATE)
 
