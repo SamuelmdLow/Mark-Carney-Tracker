@@ -94,7 +94,6 @@ class ScheduleItemManager(models.Manager):
             matches, key=lambda match: match.score if match else float("-inf"))
 
         if not best_match:
-            print("No matches found")
             return None
 
         THRESHOLD = 0.6
