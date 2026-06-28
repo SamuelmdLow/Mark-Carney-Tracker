@@ -2,34 +2,15 @@ from django.db import models
 from django.db.models import JSONField, DateTimeField, ForeignKey, URLField, CharField
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
-from django.db.models import F, Q
-from django.db.models.functions import Extract, Abs
-from pgvector.django import CosineDistance
 
-from schedule_items.models import ScheduleItem
 from semantic_index.models import SemanticIndex
-
-from celery import chord
-
-from bs4 import BeautifulSoup
-import aiohttp
-import asyncio
-from asgiref.sync import async_to_sync, sync_to_async
-import datetime
-import re
-import json
-
-import ffmpeg
-import whisper
-import numpy as np
-#from speechbrain.inference.separation import SepformerSeparation
 
 # Create your models here.
 
 class AttachmentManager(models.Manager):
     
     def bulk_create_and_index(self, objects):
-        from attachments.tasks import populate_attachment_data_task, index_attachment
+        from attachments.tasks import populate_attachment_data_task
 
         attachments = Attachment.objects.bulk_create(objects)
         

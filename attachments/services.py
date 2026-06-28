@@ -1,7 +1,5 @@
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
-from django.db.models import F, Q
-from django.db.models.functions import Extract, Abs
 from pgvector.django import CosineDistance
 
 from semantic_index.models import SemanticIndex
@@ -9,16 +7,13 @@ from schedule_items.models import ScheduleItem
 from attachments.models import Attachment
 
 from bs4 import BeautifulSoup
-import json
 import aiohttp
 import asyncio
 from asgiref.sync import async_to_sync, sync_to_async
 import datetime
-import re
 import copy
 
 import ffmpeg
-import whisper
 import numpy as np
 
 
@@ -190,7 +185,7 @@ def resegment_transcript_for_embedding(segments):
 # CPAC Attachments
 
 
-async def cpac_page_to_attachment(url: str, session: aiohttp.ClientSession) -> (None | Attachment):
+async def cpac_page_to_attachment(url: str) -> (None | Attachment):
     '''
     Create Attachment object from CPAC page
 
@@ -199,54 +194,55 @@ async def cpac_page_to_attachment(url: str, session: aiohttp.ClientSession) -> (
     Returns Attachment object but does not save it to the database.
     '''
     try:
-        async with session.get(url) as response:
-            if response.status != 200:
-                print(
-                    f"Failed to fetch {url} with status code {response.status}")
-                return None
-            page_html = await response.text()
-            soup = BeautifulSoup(page_html, "html.parser")
-            title = soup.find("meta", property="og:title")["content"]
-            description = soup.find(
-                "meta", property="og:description")["content"]
-            video = soup.find("meta", property="og:video")[
-                "content"][:-len(".mu38")]
-
-            video_meta_element = soup.find("div", id="video-page-video")
-            if video_meta_element and video_meta_element.has_attr("data-livedatetime"):
-                day_published = datetime.datetime.fromisoformat(
-                    video_meta_element["data-livedatetime"]).astimezone(datetime.timezone.utc)
-
-                attachment_datetime = datetime.datetime.fromisoformat(
-                    video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
-
-                duration_text = video_meta_element["data-videoduration"].split(
-                    ":")
-                if len(duration_text) == 3:
-                    attachment_datetime = attachment_datetime - datetime.timedelta(seconds=int(
-                        duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
-
-                if abs((attachment_datetime - day_published).total_seconds()) > 24 * 3600:
-                    # Use 'data-livedatetime' if 'data-lastdatemodified' is more than 24 hours separated
-                    attachment_datetime = day_published
-
-                schedule_item = await ScheduleItem.objects.get_time_relevant([title, description], attachment_datetime)
-
-                if not schedule_item:
-                    # Replace with creation of schedule item from attachment content
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    print(
+                        f"Failed to fetch {url} with status code {response.status}")
                     return None
+                page_html = await response.text()
+                soup = BeautifulSoup(page_html, "html.parser")
+                title = soup.find("meta", property="og:title")["content"]
+                description = soup.find(
+                    "meta", property="og:description")["content"]
+                video = soup.find("meta", property="og:video")[
+                    "content"][:-len(".mu38")]
 
-                attachment = Attachment(
-                    title=title,
-                    content=description,
-                    source=url,
-                    published_at=attachment_datetime,
-                    json={
-                        "video_m3u8": video
-                    },
-                    schedule_item=schedule_item
-                )
-                return attachment
+                video_meta_element = soup.find("div", id="video-page-video")
+                if video_meta_element and video_meta_element.has_attr("data-livedatetime"):
+                    day_published = datetime.datetime.fromisoformat(
+                        video_meta_element["data-livedatetime"]).astimezone(datetime.timezone.utc)
+
+                    attachment_datetime = datetime.datetime.fromisoformat(
+                        video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
+
+                    duration_text = video_meta_element["data-videoduration"].split(
+                        ":")
+                    if len(duration_text) == 3:
+                        attachment_datetime = attachment_datetime - datetime.timedelta(seconds=int(
+                            duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
+
+                    if abs((attachment_datetime - day_published).total_seconds()) > 24 * 3600:
+                        # Use 'data-livedatetime' if 'data-lastdatemodified' is more than 24 hours separated
+                        attachment_datetime = day_published
+
+                    schedule_item = await ScheduleItem.objects.get_time_relevant([title, description], attachment_datetime)
+
+                    if not schedule_item:
+                        # Replace with creation of schedule item from attachment content
+                        return None
+
+                    attachment = Attachment(
+                        title=title,
+                        content=description,
+                        source=url,
+                        published_at=attachment_datetime,
+                        json={
+                            "video_m3u8": video
+                        },
+                        schedule_item=schedule_item
+                    )
+                    return attachment
     except:
         print(f"Error scraping {url}")
         return None
@@ -350,25 +346,25 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
 
 
 async def cpac_create_attachments_from_urls(urls: list[str]) -> list[Attachment]:
-    async with aiohttp.ClientSession() as session:
-        semaphore = asyncio.Semaphore(10)
-        
-        async def controlled_cpac_page_to_attachment(url):
-            async with semaphore:
-                return await cpac_page_to_attachment(url, session)
+    semaphore = asyncio.Semaphore(10)
+    
+    async def controlled_cpac_page_to_attachment(url):
+        async with semaphore:
+            return await cpac_page_to_attachment(url)
 
-        attachments = await asyncio.gather(*[controlled_cpac_page_to_attachment(url) for url in urls])
+    attachments = await asyncio.gather(*[controlled_cpac_page_to_attachment(url) for url in urls])
 
-        attachments = list(filter(lambda a: a is not None, attachments))
+    attachments = list(filter(lambda a: a is not None, attachments))
 
-        print(f"Creating {len(attachments)} attachments...")
-        return await sync_to_async(Attachment.objects.bulk_create_and_index)(attachments)
+    print(f"Creating {len(attachments)} attachments...")
+    return await sync_to_async(Attachment.objects.bulk_create_and_index)(attachments)
 
 
 async def cpac_scrape_all():
     '''
     Scrape all CPAC pages relevant to Mark Carney interviews and create attachments
     '''
+    from attachments.tasks import cpac_create_from_url_task    
     CUTOFF_DATE = datetime.datetime(
         year=2025, month=4, day=1, tzinfo=datetime.timezone.utc)
 
@@ -377,7 +373,8 @@ async def cpac_scrape_all():
     for sitemap_url in sitemap_urls:
         urls = await cpac_sitemap_get_relevant_urls(sitemap_url, cutoff_time=CUTOFF_DATE)
 
-        await cpac_create_attachments_from_urls(urls)
+        for url in urls:
+            cpac_create_from_url_task.delay(url)
 
 
 async def cpac_scrape_recent():
