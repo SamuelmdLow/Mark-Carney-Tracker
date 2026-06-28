@@ -3,7 +3,7 @@ ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
 
-COPY . .
+COPY . /app/
 
 RUN sudo apt-get update
 RUN sudo apt-get install -y ffmpeg 
