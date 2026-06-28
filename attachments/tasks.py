@@ -25,7 +25,9 @@ def cpac_create_from_url_task(url: str):
     from attachments.services import cpac_page_to_attachment
     attachment = async_to_sync(cpac_page_to_attachment)(url)
     if attachment:
-        return attachment.save()
+        createdObject = attachment.save()
+        populate_attachment_data_task.delay_on_commit(createdObject.pk)
+        return createdObject
     return None
 
 
