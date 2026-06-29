@@ -28,6 +28,11 @@ app.conf.beat_schedule = {
     },
 }
 
+app.conf.task_routes = {
+    'attachments.tasks.populate_attachment_data_task': {'queue': 'transcription'}
+}
+
+
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')
