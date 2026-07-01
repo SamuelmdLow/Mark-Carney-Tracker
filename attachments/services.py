@@ -54,9 +54,9 @@ class M3U8():
     def load(self, m3u8_url_base: str) -> M3U8:
         return async_to_sync(self.aload)(m3u8_url_base)
 
-    async def aget_audio(self, name=None, sample_rate=16000):
+    async def aget_audio_urls(self, name=None):  # , sample_rate=16000
         '''
-        Get, concat, and return audio listed in m3u8 file
+        Get audio urls listed in m3u8 file
         '''
         audios = list(
             filter(lambda l: "TYPE" in l and l["TYPE"] == "AUDIO", self.tags))
@@ -77,30 +77,160 @@ class M3U8():
                 clip_marker = 'EXTINF'
                 clips = filter(lambda l: l[:len(clip_marker)]
                                == clip_marker, audio_lines)
-                clip_urls = map(lambda l: self.m3u8_url_base +
-                                l.split('\n')[1], clips)
-                clip_audios = list(
-                    map(lambda url: ffmpeg.input(url), clip_urls))
+                clip_urls = list(map(lambda l: self.m3u8_url_base +
+                                     l.split('\n')[1], clips))
+                return clip_urls
 
-                out, _ = (
-                    ffmpeg
-                    .concat(*clip_audios, v=0, a=1)
-                    .output('pipe:', format='s16le', acodec='pcm_s16le', ac=1, ar=str(sample_rate))
-                    .run(capture_stdout=True, capture_stderr=True)
-                )
-
-                return out
-
-    def get_audio(self, name=None, sample_rate=16000):
-        return async_to_sync(self.aget_audio)(name=name, sample_rate=sample_rate)
+    def get_audio_urls(self, name=None):
+        return async_to_sync(self.aget_audio_urls)(name=name)
 
 
-def transcribe_audio(audio):
+def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=40, overlap=5, sample_rate=16000):
+    SEGMENT_DURATION = 6
+    grouped_urls = [urls[n:n+group_size]
+                    for n in range(0, len(urls), group_size-overlap)]
+
+    def skip_overlap_in_transcript(transcription: list[dict], overlap_skip: int, moment: str):
+        if overlap_skip < 0:
+            return transcription
+        gap = None
+        for i in range(len(transcription)):
+            newGap = abs(overlap_skip - transcription[i][moment])
+            print(f"{overlap_skip} {newGap} {gap}")
+            if gap:
+                if newGap > gap:
+                    return transcription[i-1:]
+            gap = newGap
+        return []
+
+    def adjust_transcription_timestamps(transcription: list[dict], adjustment: int):
+        def adjust_segment(segment: dict):
+            segment["end"] = segment["end"] + adjustment
+            segment["start"] = segment["start"] + adjustment
+            if "words" in segment:
+                for i in range(len(segment["words"])):
+                    segment["words"][i] = adjust_segment(segment["words"][i])
+            return segment
+
+        for i in range(len(transcription)):
+            transcription[i] = adjust_segment(transcription[i])
+        return transcription
+
+    transcript = []
+    overlap_skip = 0
+    total_duration = 0
+    moment = "start"
+    for group in grouped_urls:
+        audio = audio_urls_to_ffmpeg(group, sample_rate=sample_rate)
+
+        initial_prompt = initial_prompt + " " + \
+            " ".join([segment["text"] for segment in transcript])
+
+        print(f"{overlap_skip}")
+        transcription = skip_overlap_in_transcript(
+            transcribe_audio(audio, initial_prompt=initial_prompt), overlap_skip=overlap_skip, moment=moment)
+
+        adjustment = total_duration - overlap_skip
+
+        if len(transcription) > 0:
+            end_gap = transcription[-1]["end"] - \
+                (SEGMENT_DURATION * (group_size-overlap))
+            start_gap = transcription[-1]["start"] - \
+                (SEGMENT_DURATION * (group_size-overlap))
+
+            moment = "end"
+            if end_gap > 0 and start_gap > 0:
+                moment = "start"
+                transcription = transcription[:-1]
+
+            duration = transcription[-1][moment] - overlap_skip
+            overlap_skip = transcription[-1][moment] - \
+                (SEGMENT_DURATION * (group_size-overlap))
+            print(
+                f"duration {duration} seconds, overlap_skip {overlap_skip} seconds")
+        else:
+            overlap_skip = 0
+            moment = "start"
+            duration = SEGMENT_DURATION * (group_size-overlap)
+            print(
+                f"Empty transcription for group, skipping {duration} seconds")
+
+        transcription = adjust_transcription_timestamps(
+            transcription, adjustment=adjustment)
+        print(f"{"\n".join([segment["text"] for segment in transcription])}")
+        transcript += transcription
+
+        total_duration += duration
+
+    return transcript
+
+
+def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000):
+    clip_audios = list(
+        map(lambda url: ffmpeg.input(url), urls))
+
+    try:
+        out, _ = (
+            ffmpeg
+            .concat(*clip_audios, v=0, a=1)
+            .output('pipe:', format='s16le', acodec='pcm_s16le', ac=1, ar=str(sample_rate))
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        return out
+    except ffmpeg.Error as e:
+        print('stdout:', e.stdout.decode('utf8'))
+        print('stderr:', e.stderr.decode('utf8'))
+        raise e
+
+
+def transcribe_audio(audio, initial_prompt=""):
+
+    reference_prompt = '''
+    This is a Canadian federal government media event. Use Candian spelling and correct government terminology. There will likely be both English and French.
+
+    The federal parties are:
+     - Liberal Party of Canada, Mark Carney
+     - Conservative Party of Canada (CPC), Pierre Poilievre
+     - New Democratic Party (NDP), Avi Lewis
+     - Bloc Québécois, Yves-François Blanchet
+     - Green Party of Canada, Elizabeth May
+
+    The provinces and territories of Canada are: 
+     - Alberta, Premier: Danielle Smith, 
+        - Edmonton, Calgary, Red Deer, Lethbridge, Medicine Hat, Grande Prairie, Fort McMurray, Sherwood Park
+     - British Columbia, Premier: David Eby,
+        - Vancouver, Victoria, Surrey, Burnaby, Kelowna, Kamloops, Nanaimo, Abbotsford
+     - Manitoba, Premier: Wab Kinew,
+        - Winnipeg, Brandon, Steinbach, Thompson, Portage la Prairie, Selkirk
+     - New Brunswick, Premier: Susan Holt,
+        - Fredericton, Moncton, Saint John, Bathurst, Miramichi, Edmundston
+     - Newfoundland and Labrador, Premier: 	Tony Wakeham,
+        - St. John's, Corner Brook, Gander, Grand Falls-Windsor, Happy Valley-Goose Bay
+     - Northwest Territories, Premier: Rocky "R.J." Simpson,
+        - Yellowknife, Hay River, Inuvik, Fort Smith, Behchokǫ̀
+     - Nova Scotia, Premier: Tim Houston,
+        - Halifax, Sydney, Dartmouth, Truro, New Glasgow
+     - Nunavut, Premier: John Main
+        - Iqaluit, Rankin Inlet, Arviat, Baker Lake, Cambridge Bay
+     - Ontario, Premier: Doug Ford,
+        - Toronto, Ottawa, Mississauga, Brampton, Hamilton, London, Markham, Vaughan, Kitchener, Windsor
+     - Prince Edward Island, Premier: Rob Lantz
+        - Charlottetown, Summerside, Stratford, Cornwall, Montague
+     - Québec, Premier: Christine Fréchette
+        - Montréal, Québec City, Laval, Gatineau, Longueuil, Sherbrooke, Saguenay
+     - Saskatchewan, Premier: Scott Moe
+        - Saskatoon, Regina, Prince Albert, Moose Jaw, Swift Current
+     - Yukon, Premier: Currie Dixon
+        - Whitehorse, Dawson City, Watson Lake, Haines Junction, Carmacks
+    '''
+
+    initial_prompt = reference_prompt + " " + initial_prompt
 
     audio_np = np.frombuffer(
         audio, np.int16).flatten().astype(np.float32) / 32768.0
     model = apps.get_app_config('attachments').transcription_model
-    result = model.transcribe(audio_np, word_timestamps=True)
+    result = model.transcribe(
+        audio_np, word_timestamps=True, initial_prompt=initial_prompt)
 
     def reduce_words(word: dict):
         return {
@@ -117,13 +247,7 @@ def transcribe_audio(audio):
             "words": list(map(reduce_words, segment["words"]))
         }
 
-    transcription = {
-        "version": 0.01,
-        "transcribed_at": str(datetime.datetime.now()),
-        "segments": list(map(reduce_segment, result["segments"]))
-    }
-
-    return transcription
+    return list(map(reduce_segment, result["segments"]))
 
 
 def populate_attachment_data(attachment):
@@ -135,8 +259,13 @@ def populate_attachment_data(attachment):
 
         m3u8 = M3U8()
         m3u8.load(m3u8_base_url)
-        audio = m3u8.get_audio()
-        transcription = transcribe_audio(audio)
+        audio_urls = m3u8.get_audio_urls()
+
+        transcription = {
+            "version": 0.01,
+            "transcribed_at": str(datetime.datetime.now()),
+            "segments": audio_urls_to_transcription(audio_urls, initial_prompt=attachment.content)
+        }
 
         data['transcription'] = transcription
 
@@ -182,8 +311,8 @@ def resegment_transcript_for_embedding(segments):
 
     return segmented_texts
 
-# CPAC Attachments
 
+# CPAC Attachments
 
 async def cpac_page_to_attachment(url: str) -> (None | Attachment):
     '''
@@ -200,49 +329,80 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                     print(
                         f"Failed to fetch {url} with status code {response.status}")
                     return None
+
                 page_html = await response.text()
                 soup = BeautifulSoup(page_html, "html.parser")
+
                 title = soup.find("meta", property="og:title")["content"]
+
                 description = soup.find(
                     "meta", property="og:description")["content"]
+
+                image = soup.find(
+                    "meta", property="og:image")["content"]
+
                 video = soup.find("meta", property="og:video")[
                     "content"][:-len(".mu38")]
 
                 video_meta_element = soup.find("div", id="video-page-video")
-                if video_meta_element and video_meta_element.has_attr("data-livedatetime"):
-                    day_published = datetime.datetime.fromisoformat(
-                        video_meta_element["data-livedatetime"]).astimezone(datetime.timezone.utc)
 
-                    attachment_datetime = datetime.datetime.fromisoformat(
-                        video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
+                livedatetime = datetime.datetime.fromisoformat(
+                    video_meta_element["data-livedatetime"]).astimezone(datetime.timezone.utc)
 
-                    duration_text = video_meta_element["data-videoduration"].split(
-                        ":")
-                    if len(duration_text) == 3:
-                        attachment_datetime = attachment_datetime - datetime.timedelta(seconds=int(
-                            duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
+                lastdatemodified = datetime.datetime.fromisoformat(
+                    video_meta_element["data-lastdatemodified"]).astimezone(datetime.timezone.utc)
 
-                    if abs((attachment_datetime - day_published).total_seconds()) > 24 * 3600:
-                        # Use 'data-livedatetime' if 'data-lastdatemodified' is more than 24 hours separated
-                        attachment_datetime = day_published
+                duration_text = video_meta_element["data-videoduration"].split(
+                    ":")
 
-                    schedule_item = await ScheduleItem.objects.get_time_relevant([title, description], attachment_datetime)
+                video_duration = datetime.timedelta(seconds=int(
+                    duration_text[2]), minutes=int(duration_text[1]), hours=int(duration_text[0]))
 
-                    if not schedule_item:
-                        # Replace with creation of schedule item from attachment content
+                # Subtract duration from modified time to get the event's start time (Assuming modified time is correct).
+                attachment_datetime = lastdatemodified - video_duration
+
+                if abs((attachment_datetime - livedatetime).total_seconds()) > 24 * 3600:
+                    # Use 'data-livedatetime' if 'data-lastdatemodified' is more than 24 hours separated
+                    # livedatetime typically has the correct date but wrong time, almost all articles claim to be live at 4am UTC
+                    # so we tend to use lastdatemodified time instead, unless a large departure.
+                    attachment_datetime = livedatetime
+
+                schedule_item = await ScheduleItem.objects.get_time_relevant([title, description], attachment_datetime)
+
+                if not schedule_item:
+                    # Replace with creation of schedule item from attachment content
+                    terms = ["PM Carney", "PM Mark Carney"]
+                    if any([title[:len(term)] == term for term in terms]):
+
+                        content = description
+                        content_split = content.split(". ")
+
+                        for i in range(1, len(content_split)):
+                            if len(content_split[i]) > 0 and (content_split[i][0].isupper() or not content_split[i][0].isalpha()):
+                                content = ". ".join(content_split[:i]) + "."
+                                break
+
+                        schedule_item = await ScheduleItem.objects.acreate(
+                            content=content,
+                            datetime=attachment_datetime,
+                            source=response.url,
+                        )
+                    else:
                         return None
 
-                    attachment = Attachment(
-                        title=title,
-                        content=description,
-                        source=url,
-                        published_at=attachment_datetime,
-                        json={
-                            "video_m3u8": video
-                        },
-                        schedule_item=schedule_item
-                    )
-                    return attachment
+                attachment = Attachment(
+                    title=title,
+                    content=description,
+                    source=url,
+                    published_at=attachment_datetime,
+                    json={
+                        "video_m3u8": video,
+                        "video_poster": image,
+                        "video_duration": video_duration.total_seconds(),
+                    },
+                    schedule_item=schedule_item
+                )
+                return attachment
     except:
         print(f"Error scraping {url}")
         return None
@@ -304,7 +464,8 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False
 
-                if await Attachment.objects.filter(source=url.find("loc").text).aexists():
+                query = url.find("loc").text.split("?")[-1]
+                if await Attachment.objects.filter(source__endswith=query).aexists():
                     return False
 
                 necessary_terms = ["carney", "headline-politics"]
@@ -341,13 +502,14 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                 return url.find("loc").text
 
             relevant_urls = [extract_url_info(url) async for url in async_filter(relevant_url, urls)]
-            print(f"{sitemap_url}\n     - {len(relevant_urls)} potentially relevant urls")
+            print(
+                f"{sitemap_url}\n     - {len(relevant_urls)} potentially relevant urls")
             return relevant_urls
 
 
 async def cpac_create_attachments_from_urls(urls: list[str]) -> list[Attachment]:
     semaphore = asyncio.Semaphore(10)
-    
+
     async def controlled_cpac_page_to_attachment(url):
         async with semaphore:
             return await cpac_page_to_attachment(url)
@@ -364,7 +526,7 @@ async def cpac_scrape_all():
     '''
     Scrape all CPAC pages relevant to Mark Carney interviews and create attachments
     '''
-    from attachments.tasks import cpac_create_from_url_task    
+    from attachments.tasks import cpac_create_from_url_task
     CUTOFF_DATE = datetime.datetime(
         year=2025, month=4, day=1, tzinfo=datetime.timezone.utc)
 
@@ -382,7 +544,7 @@ async def cpac_scrape_recent():
     Scrape most recent sitemap and create attachments for any new Mark Carney interviews
     '''
     CUTOFF_DATE = datetime.datetime.now(
-        tz=datetime.timezone.utc) - datetime.timedelta(days=7)
+        tz=datetime.timezone.utc) - datetime.timedelta(days=14)
 
     sitemap_urls = await cpac_read_sitemap_index(CUTOFF_DATE)
 

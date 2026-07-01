@@ -10,7 +10,7 @@ def populate_attachment_data_task(attachment_pk: int):
     from attachments.services import populate_attachment_data
     attachment = Attachment.objects.get(pk=attachment_pk)
     populate_attachment_data(attachment)
-    attachment.index()
+    index_attachment.delay_on_commit(attachment.pk)
     return attachment
 
 
