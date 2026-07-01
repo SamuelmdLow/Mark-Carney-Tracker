@@ -6,4 +6,4 @@ class Command(BaseCommand):
     help = "Closes the specified poll for voting"
 
     def handle(self, *args, **options):
-        async_to_sync(cpac_scrape_recent)()
+        async_to_sync(cpac_scrape_recent)(days=7)

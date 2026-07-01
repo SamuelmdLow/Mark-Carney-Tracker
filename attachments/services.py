@@ -54,7 +54,7 @@ class M3U8():
     def load(self, m3u8_url_base: str) -> M3U8:
         return async_to_sync(self.aload)(m3u8_url_base)
 
-    async def aget_audio_urls(self, name=None):  # , sample_rate=16000
+    async def aget_audio_urls(self, name=None) -> list[str]:
         '''
         Get audio urls listed in m3u8 file
         '''
@@ -85,12 +85,16 @@ class M3U8():
         return async_to_sync(self.aget_audio_urls)(name=name)
 
 
-def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=40, overlap=5, sample_rate=16000):
+def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=40, overlap=5, sample_rate=16000) -> list[dict]:
+    '''
+    Creates overlapping audio segments, transcribes them, and then merges the transcripts together, skipping overlapping segments. Returns a list of transcript segments.
+    '''
+
     SEGMENT_DURATION = 6
     grouped_urls = [urls[n:n+group_size]
                     for n in range(0, len(urls), group_size-overlap)]
 
-    def skip_overlap_in_transcript(transcription: list[dict], overlap_skip: int, moment: str):
+    def skip_overlap_in_transcript(transcription: list[dict], overlap_skip: int, moment: str) -> list[dict]:
         if overlap_skip < 0:
             return transcription
         gap = None
@@ -103,7 +107,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
             gap = newGap
         return []
 
-    def adjust_transcription_timestamps(transcription: list[dict], adjustment: int):
+    def adjust_transcription_timestamps(transcription: list[dict], adjustment: int) -> list[dict]:
         def adjust_segment(segment: dict):
             segment["end"] = segment["end"] + adjustment
             segment["start"] = segment["start"] + adjustment
@@ -165,7 +169,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
     return transcript
 
 
-def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000):
+def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
     clip_audios = list(
         map(lambda url: ffmpeg.input(url), urls))
 
@@ -183,7 +187,7 @@ def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000):
         raise e
 
 
-def transcribe_audio(audio, initial_prompt=""):
+def transcribe_audio(audio, initial_prompt="") -> list[dict]:
 
     reference_prompt = '''
     This is a Canadian federal government media event. Use Candian spelling and correct government terminology. There will likely be both English and French.
@@ -250,7 +254,7 @@ def transcribe_audio(audio, initial_prompt=""):
     return list(map(reduce_segment, result["segments"]))
 
 
-def populate_attachment_data(attachment):
+def populate_attachment_data(attachment) -> Attachment:
 
     data = attachment.json
 
@@ -275,7 +279,11 @@ def populate_attachment_data(attachment):
     return attachment
 
 
-def resegment_transcript_for_embedding(segments):
+def resegment_transcript_for_embedding(segments) -> list[str]:
+    '''
+    Concat transcript segments into groups that are semantically similar and temporally close, so that they can be embedded together. Returns a list of strings.
+    '''
+
     MIN_SEGMENT_LENGTH = 15
 
     model = apps.get_app_config('semantic_index').model
@@ -539,12 +547,12 @@ async def cpac_scrape_all():
             cpac_create_from_url_task.delay(url)
 
 
-async def cpac_scrape_recent():
+async def cpac_scrape_recent(days=1):
     '''
     Scrape most recent sitemap and create attachments for any new Mark Carney interviews
     '''
     CUTOFF_DATE = datetime.datetime.now(
-        tz=datetime.timezone.utc) - datetime.timedelta(days=14)
+        tz=datetime.timezone.utc) - datetime.timedelta(days=days)
 
     sitemap_urls = await cpac_read_sitemap_index(CUTOFF_DATE)
 
