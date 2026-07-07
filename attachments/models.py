@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import JSONField, DateTimeField, ForeignKey, URLField, CharField
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
+from django.contrib.contenttypes.fields import GenericRelation
 
 from semantic_index.models import SemanticIndex
 
@@ -25,7 +26,9 @@ class Attachment(models.Model):
     json = JSONField()
     title = CharField(max_length=255)
     content = CharField(max_length=102300)
-    source = URLField(max_length=511)
+    source = URLField(max_length=511, unique=True)
+
+    semantic_indices = GenericRelation(SemanticIndex, related_query_name="attachment")
 
     objects = AttachmentManager()
 
@@ -58,3 +61,6 @@ class Attachment(models.Model):
                 datetime=self.published_at,
                 content_object=self,
             ) for (text, embedding) in list(zip(text_segments, embeddings))])
+        
+    class Meta:
+        ordering = ["-published_at"]

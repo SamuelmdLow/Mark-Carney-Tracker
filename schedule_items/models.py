@@ -2,6 +2,7 @@ from django.apps import apps
 from django.db import models
 from django.db.models import DateTimeField, CharField, FloatField, URLField, ForeignKey
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes.fields import GenericRelation
 from django.db.models import F
 from django.db.models.functions import Extract, Abs
 from pgvector.django import CosineDistance
@@ -119,8 +120,10 @@ class ScheduleItemManager(models.Manager):
 class ScheduleItem(models.Model):
     content = CharField(max_length=511)
     datetime = DateTimeField()
-    location = ForeignKey(to=Location, null=True, on_delete=models.SET_NULL)
+    location = ForeignKey(to=Location, null=True, on_delete=models.SET_NULL, related_name="schedule_items")
     source = URLField(max_length=511)
+
+    semantic_indices = GenericRelation(SemanticIndex, related_query_name="schedule_item")
 
     objects = ScheduleItemManager()
 
@@ -141,3 +144,6 @@ class ScheduleItem(models.Model):
             datetime=self.datetime,
             content_object=self,
         )
+
+    class Meta:
+        ordering = ["-datetime"]

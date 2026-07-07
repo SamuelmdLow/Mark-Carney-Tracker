@@ -31,8 +31,6 @@ SECRET_KEY = env('SECRET_KEY', default="SOMETHING_SILLY")
 
 ALLOWED_HOSTS = [env('HTTP_HOST', default='localhost'), 'localhost', '127.0.0.1']
 
-USE_X_FORWARDED_HOST = env('USE_X_FORWARDED_HOST', default=False)
-
 # Application definition
 
 INSTALLED_APPS = [
@@ -42,6 +40,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    "corsheaders",
 
     'schedule_items',
     'attachments',
@@ -53,6 +53,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -60,6 +61,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    
 ]
 
 ROOT_URLCONF = 'pm_tracker.urls'
@@ -78,6 +80,8 @@ TEMPLATES = [
         },
     },
 ]
+
+CORS_ALLOW_ALL_ORIGINS = True
 
 WSGI_APPLICATION = 'pm_tracker.wsgi.application'
 

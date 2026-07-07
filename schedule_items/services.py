@@ -119,7 +119,7 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
                 year=year, month=month, day=day, hour=hours, minute=minutes, tzinfo=tz)
 
             if "p.m" in time_string[1]:
-                if hours!=12:
+                if hours != 12:
                     time = time + datetime.timedelta(hours=12)
             elif hours == 12:
                 time.hour = time.hour - 12
@@ -177,10 +177,12 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
         return items
 
     nodeUrl = f"https://www.pm.gc.ca/en/node/{id}"
-
+    
     try:
         async with session.get(nodeUrl) as response:
             url = response.url
+
+            date_from_url = str(url).split("/")[-1].replace("update-", "")
 
             soup = BeautifulSoup(await response.text(), features="html.parser")
 
@@ -188,7 +190,7 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
             if dmy == False:
                 print(f'ERROR AT {url}')
                 return []
-            
+
             items = await readItems(soup, dmy)
 
             unchangedItemsIds = []
@@ -196,7 +198,6 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
             for item in items:
                 match = await ScheduleItem.objects \
                     .filter(
-                        source=item.source,
                         datetime=item.datetime,
                         location=item.location,
                         content=item.content) \
@@ -207,17 +208,18 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
                     newItems.append(item)
 
             # delete items created from the source url that have been changed or deleted since last scrape (if any)
-            deleted = await ScheduleItem.objects.filter(source=url).exclude(pk__in=unchangedItemsIds).adelete()
-            
+            deleted = await ScheduleItem.objects.filter(source__endswith=date_from_url).exclude(pk__in=unchangedItemsIds).adelete()
+
             # create items that are new or have been changed since last scrape (if any)
             created = await sync_to_async(ScheduleItem.objects.bulk_create_and_index)(newItems)
 
-            #print(f"{url}\n     - preserved {len(unchangedItemsIds)}\n     - created {len(created)}\n     - deleted {deleted[0]}")
+            # print(f"{url}\n     - preserved {len(unchangedItemsIds)}\n     - created {len(created)}\n     - deleted {deleted[0]}")
 
             return created
     except:
         print(f"Failed scraping {nodeUrl}")
         return None
+
 
 async def pm_website_create_all():
     '''
@@ -230,6 +232,7 @@ async def pm_website_create_all():
         tasks = [pm_website_create_schedule_items_from_page(
             id, session) for id in ids]
         await asyncio.gather(*tasks)
+
 
 async def pm_website_scrape_recent():
     '''

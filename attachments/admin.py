@@ -7,6 +7,6 @@ from attachments.models import Attachment, AttachmentManager
 class AttachmentAdmin(admin.ModelAdmin):
     ordering = ["-published_at"]
     list_display = ["title", "schedule_item", "source", "published_at"]
-    search_fields = ["title", "content", "schedule_item__content", "published_at"]
+    search_fields = ["title", "content", "json", "source", "schedule_item__content", "published_at"]
 
 admin.site.register(Attachment, AttachmentAdmin)

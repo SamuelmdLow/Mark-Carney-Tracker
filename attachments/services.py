@@ -309,7 +309,7 @@ def resegment_transcript_for_embedding(segments) -> list[str]:
 
     def split_gaps(gaps, segments):
         if sum([segment["length"] for segment in segments]) <= max_seq_length or len(segments) <= 1:
-            return ["\n".join([segment["text"] for segment in segments])]
+            return ["".join([segment["text"] for segment in segments])]
 
         split_index = np.argmax(gaps)+1
         print(f"{split_index},\n{gaps}\n{len(segments)}")
@@ -467,7 +467,7 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                     if lastmod < cutoff_time:
                         return False
 
-                blacklist_terms = ["/primetime-politics/"]
+                blacklist_terms = ["/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/"]
 
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False
