@@ -330,6 +330,7 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
 
     Returns Attachment object but does not save it to the database.
     '''
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
@@ -398,18 +399,33 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                     else:
                         return None
 
-                attachment = Attachment(
-                    title=title,
-                    content=description,
-                    source=url,
-                    published_at=attachment_datetime,
-                    json={
-                        "video_m3u8": video,
-                        "video_poster": image,
-                        "video_duration": video_duration.total_seconds(),
-                    },
-                    schedule_item=schedule_item
-                )
+                query = str(response.url).split("?")[-1]
+                attachment = await Attachment.objects.filter(source__endswith=query).afirst()
+                if attachment:
+                    attachment.title = title
+                    attachment.content = description
+                    attachment.source = str(response.url)
+
+                    json = attachment.json
+                    json["video_m3u8"] = video
+                    json["video_poster"] = image,
+                    json["video_duration"] = video_duration.total_seconds()
+                    attachment.json = json
+
+                    attachment.schedule_item = schedule_item
+                else:
+                    attachment = Attachment(
+                        title=title,
+                        content=description,
+                        source=str(response.url),
+                        published_at=attachment_datetime,
+                        json={
+                            "video_m3u8": video,
+                            "video_poster": image,
+                            "video_duration": video_duration.total_seconds(),
+                        },
+                        schedule_item=schedule_item
+                    )
                 return attachment
     except:
         print(f"Error scraping {url}")
@@ -467,13 +483,13 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                     if lastmod < cutoff_time:
                         return False
 
-                blacklist_terms = ["/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/"]
+                blacklist_terms = [
+                    "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/"]
 
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False
 
-                query = url.find("loc").text.split("?")[-1]
-                if await Attachment.objects.filter(source__endswith=query).aexists():
+                if await Attachment.objects.filter(source=url.find("loc").text).aexists():
                     return False
 
                 necessary_terms = ["carney", "headline-politics"]

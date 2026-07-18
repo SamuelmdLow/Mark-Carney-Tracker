@@ -131,16 +131,20 @@ class ScheduleItem(models.Model):
         return f'{self.datetime.strftime("%Y-%m-%d %H:%M")} - {self.content[:200]}'
 
     def index(self):
-        
+        PRIME_MINISTER_NAME = "Mark Carney"
+
         schedule_item_content_type = ContentType.objects.get_for_model(self)
 
         SemanticIndex.objects.filter(content_type=schedule_item_content_type, object_id=self.id).delete()
 
         model = apps.get_app_config('semantic_index').model
 
+        content = f"{self.content.replace('The Prime Minister', 'Prime Minister ' + PRIME_MINISTER_NAME)} ({self.location})"
+
         SemanticIndex.objects.create(
-            embedding=model.encode(self.content),
-            body=self.content,
+            embedding=model.encode(content),
+            body=content,
+            label=SemanticIndex.SourceType.META_DESCRIPTOR,
             datetime=self.datetime,
             content_object=self,
         )

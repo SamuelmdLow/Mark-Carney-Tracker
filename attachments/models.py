@@ -13,7 +13,9 @@ class AttachmentManager(models.Manager):
     def bulk_create_and_index(self, objects):
         from attachments.tasks import populate_attachment_data_task
 
-        attachments = Attachment.objects.bulk_create(objects)
+        update_fields = ["schedule_item", "json", "title", "content", "source"]
+        unique_fields = ["id"]
+        attachments = Attachment.objects.bulk_create(objects, update_conflicts=True, update_fields=update_fields, unique_fields=unique_fields)
         
         for attachment in attachments:
             populate_attachment_data_task.delay_on_commit(attachment.pk)
@@ -43,8 +45,15 @@ class Attachment(models.Model):
         SemanticIndex.objects.filter(content_type=attachment_content_type, object_id=self.id).delete()
  
         model = apps.get_app_config('semantic_index').model
-
+          
         text_segments = [self.title, self.content]
+
+        def modify_text(string:str):
+            string = string.replace("PM Carney", "Prime Minister Mark Carney")
+            string = string.replace("PM Mark Carney", "Prime Minister Mark Carney")
+            return string
+
+        text_segments = list(map(modify_text, text_segments))
         labels = 2 * [SemanticIndex.SourceType.META_DESCRIPTOR]
 
         data = self.json
@@ -58,9 +67,10 @@ class Attachment(models.Model):
             SemanticIndex(
                 embedding=embedding,
                 body=text,
+                label=label,
                 datetime=self.published_at,
                 content_object=self,
-            ) for (text, embedding) in list(zip(text_segments, embeddings))])
+            ) for (text, embedding, label) in list(zip(text_segments, embeddings, labels))])
         
     class Meta:
         ordering = ["-published_at"]

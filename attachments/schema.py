@@ -11,7 +11,7 @@ from semantic_index.models import SemanticIndex
 class AttachmentNode(DjangoObjectType):
     class Meta:
         model = Attachment
-        fields = ("id", "title", "content", "published_at", "source", "schedule_item")
+        fields = ("id", "title", "content", "json", "published_at", "source", "schedule_item")
         filter_fields = ["id", "title", "content", "published_at", "source"]
         interfaces = (relay.Node, )
 
