@@ -546,6 +546,19 @@ async def cpac_create_attachments_from_urls(urls: list[str]) -> list[Attachment]
     return await sync_to_async(Attachment.objects.bulk_create_and_index)(attachments)
 
 
+async def cpac_update_all():
+    '''
+    Scrape all CPAC pages relevant to Mark Carney interviews and create attachments
+    '''
+    from attachments.tasks import cpac_create_from_url_task
+    attachments = [a async for a in Attachment.objects.filter(source__startswith="https://www.cpac.ca")]
+    urls = list(map(lambda x: x.source, attachments))
+
+    for url in urls:
+        print(url)
+        cpac_create_from_url_task.delay(url, populate=False)
+
+
 async def cpac_scrape_all():
     '''
     Scrape all CPAC pages relevant to Mark Carney interviews and create attachments

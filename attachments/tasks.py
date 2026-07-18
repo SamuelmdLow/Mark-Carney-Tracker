@@ -21,12 +21,13 @@ def index_attachment(attachment_pk: int):
 
 
 @shared_task
-def cpac_create_from_url_task(url: str):
+def cpac_create_from_url_task(url: str, populate:bool=True):
     from attachments.services import cpac_page_to_attachment
     attachment = async_to_sync(cpac_page_to_attachment)(url)
     if attachment:
         attachment.save()
-        populate_attachment_data_task.delay_on_commit(attachment.pk)
+        if populate:
+            populate_attachment_data_task.delay_on_commit(attachment.pk)
         return attachment
     return None
 
