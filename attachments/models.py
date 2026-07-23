@@ -4,7 +4,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from django.contrib.contenttypes.fields import GenericRelation
 
+from pgvector.django import VectorField, CosineDistance
+
 from semantic_index.models import SemanticIndex
+
 
 # Create your models here.
 
@@ -28,7 +31,7 @@ class Attachment(models.Model):
     json = JSONField()
     title = CharField(max_length=255)
     content = CharField(max_length=102300)
-    source = URLField(max_length=511, unique=True)
+    source = URLField(max_length=511)
 
     semantic_indices = GenericRelation(SemanticIndex, related_query_name="attachment")
 
@@ -56,10 +59,11 @@ class Attachment(models.Model):
         text_segments = list(map(modify_text, text_segments))
         labels = 2 * [SemanticIndex.SourceType.META_DESCRIPTOR]
 
-        data = self.json
-        if "transcription" in data:
-            text_segments += resegment_transcript_for_embedding(data["transcription"]["segments"])        
-            labels += len(data["transcription"]["segments"]) * [SemanticIndex.SourceType.TRANSCRIPT]
+        contents = [c.data for c in self.contents.all()]
+
+        if len(contents) > 0:
+            text_segments += [segment["text"] for segment in resegment_transcript_for_embedding(contents)]      
+            labels += len(contents) * [SemanticIndex.SourceType.TRANSCRIPT]
 
         embeddings = model.encode(text_segments).tolist()
             
@@ -74,22 +78,18 @@ class Attachment(models.Model):
 
     def scoreContent(self, query):
         model = apps.get_app_config('semantic_index').model
-        
-        data = self.json
-        if "transcription" in data:
-            sentences = list(map(lambda s: s['text'], data["transcription"]["segments"]))
-            embeddings = model.encode(sentences).tolist()
-            query_embedding = model.encode(query)
-            scores = model.similarity(embeddings, query_embedding).tolist()
-
-            scored_content = data["transcription"]["segments"]
-
-            for i in range(len(scored_content)):
-                scored_content[i]["score"] = scores[i][0]
-
-            return scored_content
-        
-        return []
+        query_embedding = model.encode(query)
+        return list(self.contents.all().annotate(score=CosineDistance('embedding', query_embedding)).values("data", "score"))
         
     class Meta:
         ordering = ["-published_at"]
+
+class AttachmentContent(models.Model):
+    data = models.JSONField()
+    ordering = models.FloatField()
+    embedding = VectorField(dimensions=384)
+
+    attachment = models.ForeignKey(Attachment, on_delete=models.CASCADE, related_name='contents')
+
+    class Meta:
+        ordering = ['-id', 'ordering']

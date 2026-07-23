@@ -13,6 +13,7 @@ from asgiref.sync import async_to_sync, sync_to_async
 import datetime
 import copy
 import re
+import itertools
 
 import ffmpeg
 import numpy as np
@@ -291,32 +292,37 @@ def populate_attachment_data(attachment) -> Attachment:
     data = attachment.json
 
     if "video_m3u8" in data:
+        from attachments.models import AttachmentContent
         m3u8_base_url = data['video_m3u8']
 
         m3u8 = M3U8()
         m3u8.load(m3u8_base_url)
         audio_urls = m3u8.get_audio_urls()
 
-        transcription = {
-            "version": 0.01,
-            "transcribed_at": str(datetime.datetime.now()),
-            "segments": audio_urls_to_transcription(audio_urls, initial_prompt=attachment.content)
-        }
+        segments = audio_urls_to_transcription(audio_urls, initial_prompt=attachment.content)
 
-        data['transcription'] = transcription
-
-        attachment.json = data
+        model = apps.get_app_config('semantic_index').model
+        embeddings = model.encode([s['text'] for s in segments]).tolist()
+        
+        AttachmentContent.objects.filter(attachment=attachment).delete()
+        AttachmentContent.objects.bulk_create(
+            [AttachmentContent(
+                attachment=attachment,
+                ordering=segment['start'],
+                data=segment,
+                embedding=embedding) for (segment, embedding) in zip(segments, embeddings)])
+            
 
     attachment.save()
     return attachment
 
 
-def resegment_transcript_for_embedding(segments) -> list[str]:
+def resegment_transcript_for_embedding(segments, min_segment_length=15) -> list[str]:
     '''
     Concat transcript segments into groups that are semantically similar and temporally close, so that they can be embedded together. Returns a list of strings.
     '''
 
-    MIN_SEGMENT_LENGTH = 15
+    MIN_SEGMENT_LENGTH = min_segment_length
 
     model = apps.get_app_config('semantic_index').model
 
@@ -341,10 +347,14 @@ def resegment_transcript_for_embedding(segments) -> list[str]:
 
     def split_gaps(gaps, segments):
         if sum([segment["length"] for segment in segments]) <= max_seq_length or len(segments) <= 1:
-            return [" ".join([segment["text"].strip() for segment in segments])]
+            return [{
+                "start": segments[0]["start"],
+                "end": segments[-1]["end"],
+                "text": " ".join([segment["text"].strip() for segment in segments]),
+                "words": list(itertools.chain.from_iterable([segment["words"] for segment in segments])),
+            }]
 
         split_index = np.argmax(gaps)+1
-        print(f"{split_index},\n{gaps}\n{len(segments)}")
         return split_gaps(gaps[:split_index-1], segments[:split_index]) + split_gaps(gaps[split_index:], segments[split_index:])
 
     segmented_texts = split_gaps(gap_scores, segments)
