@@ -2,7 +2,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import F
 
 import graphene
-from graphene import relay, ObjectType
+from graphene import relay, ObjectType, Connection
 from graphene_django import DjangoObjectType
 from graphene_django.filter import DjangoFilterConnectionField
 
@@ -21,11 +21,15 @@ class AttachmentNode(DjangoObjectType):
     def resolve_scored_content(self, info, query):
         return self.scoreContent(query)
 
+class AttachmentConnection(Connection):
+    class Meta:
+        node = AttachmentNode
+
 class Query(ObjectType):
     attachment = relay.Node.Field(AttachmentNode)
     all_attachments = DjangoFilterConnectionField(AttachmentNode)
 
-    attachments_semantic_search = graphene.List(AttachmentNode, query=graphene.String(required=True))
+    attachments_semantic_search = graphene.ConnectionField(AttachmentConnection, query=graphene.String(required=True))
 
     def resolve_attachments_semantic_search(root, info, query: str):
         content_type = ContentType.objects.get_for_model(Attachment)        

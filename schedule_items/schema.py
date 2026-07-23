@@ -5,7 +5,7 @@ from semantic_index.models import SemanticIndex
 from schedule_items.models import ScheduleItem, Location
 
 import graphene
-from graphene import relay, ObjectType
+from graphene import relay, ObjectType, Connection
 from graphene_django import DjangoObjectType
 from graphene_django.filter import DjangoFilterConnectionField
 
@@ -18,6 +18,9 @@ class ScheduleItemNode(DjangoObjectType):
         filter_fields = ["id", "content", "datetime", "location", "source"]
         interfaces = (relay.Node, )
 
+class ScheduleItemConnection(Connection):
+    class Meta:
+        node = ScheduleItemNode
 
 class LocationNode(DjangoObjectType):
     class Meta:
@@ -31,7 +34,7 @@ class LocationNode(DjangoObjectType):
 class Query(ObjectType):
     schedule_item = relay.Node.Field(ScheduleItemNode)
     all_schedule_items = DjangoFilterConnectionField(ScheduleItemNode)
-    schedule_item_semantic_search = graphene.List(ScheduleItemNode, query=graphene.String(required=True))
+    schedule_item_semantic_search = graphene.ConnectionField(ScheduleItemConnection, query=graphene.String(required=True))
 
     location = relay.Node.Field(LocationNode)
     all_locations = DjangoFilterConnectionField(LocationNode)
