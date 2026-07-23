@@ -39,7 +39,7 @@ class Query(ObjectType):
     location = relay.Node.Field(LocationNode)
     all_locations = DjangoFilterConnectionField(LocationNode)
 
-    def resolve_schedule_item_semantic_search(root, info, query: str):
+    def resolve_schedule_item_semantic_search(root, info, query: str, **kwargs):
         content_type = ContentType.objects.get_for_model(ScheduleItem)
         semanticIndices = SemanticIndex.objects.all().semantic_search(
             query).filter(content_type=content_type)

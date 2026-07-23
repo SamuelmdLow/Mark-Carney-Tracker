@@ -2,7 +2,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import F
 
 import graphene
-from graphene import relay, ObjectType, Connection
+from graphene import relay, ObjectType
 from graphene_django import DjangoObjectType
 from graphene_django.filter import DjangoFilterConnectionField
 
@@ -27,7 +27,7 @@ class Query(ObjectType):
 
     attachments_semantic_search = DjangoFilterConnectionField(AttachmentNode, query=graphene.String(required=True))
 
-    def resolve_attachments_semantic_search(root, info, query: str):
+    def resolve_attachments_semantic_search(root, info, query: str, **kwargs):
         content_type = ContentType.objects.get_for_model(Attachment)        
         semanticIndices = SemanticIndex.objects.all().semantic_search(query).filter(content_type=content_type)
         return Attachment.objects.select_related("schedule_item"). \
