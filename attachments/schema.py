@@ -21,15 +21,11 @@ class AttachmentNode(DjangoObjectType):
     def resolve_scored_content(self, info, query):
         return self.scoreContent(query)
 
-class AttachmentConnection(Connection):
-    class Meta:
-        node = AttachmentNode
-
 class Query(ObjectType):
     attachment = relay.Node.Field(AttachmentNode)
     all_attachments = DjangoFilterConnectionField(AttachmentNode)
 
-    attachments_semantic_search = graphene.ConnectionField(AttachmentConnection, query=graphene.String(required=True))
+    attachments_semantic_search = DjangoFilterConnectionField(AttachmentNode, query=graphene.String(required=True))
 
     def resolve_attachments_semantic_search(root, info, query: str):
         content_type = ContentType.objects.get_for_model(Attachment)        

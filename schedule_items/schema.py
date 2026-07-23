@@ -34,7 +34,7 @@ class LocationNode(DjangoObjectType):
 class Query(ObjectType):
     schedule_item = relay.Node.Field(ScheduleItemNode)
     all_schedule_items = DjangoFilterConnectionField(ScheduleItemNode)
-    schedule_item_semantic_search = graphene.ConnectionField(ScheduleItemConnection, query=graphene.String(required=True))
+    schedule_item_semantic_search = DjangoFilterConnectionField(ScheduleItemNode, query=graphene.String(required=True))
 
     location = relay.Node.Field(LocationNode)
     all_locations = DjangoFilterConnectionField(LocationNode)
