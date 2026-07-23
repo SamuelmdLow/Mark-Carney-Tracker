@@ -20,22 +20,21 @@ class SemanticIndexQuerySet(models.QuerySet):
         query_embedding = model.encode(query)
         
         scored_index = self.annotate(
-                weight=Case(
-                        When(label=SemanticIndex.SourceType.META_DESCRIPTOR, then=Value(1.0)),
-                        When(label=SemanticIndex.SourceType.TRANSCRIPT, then=Value(0.75)),
-                        default=Value(1.0),
-                        ),
                 distance=CosineDistance('embedding', query_embedding), \
-                score=F('distance') / F('weight'),)
+                score=F('distance'),)
 
         aggregate = scored_index \
             .aggregate(min=Min("score"), avg=Avg("score"))
+        print(aggregate)
 
         diff = aggregate['avg'] - aggregate['min']
-        cut_off = aggregate['min'] + math.pow(diff, 2)
+        meta_descriptor_cut_off = aggregate['min'] + math.pow(diff, 2)
+        transcript_cut_off = aggregate['min'] + math.pow(diff, 3)
         
         return scored_index \
-            .filter(Q(score__lt=cut_off) | Q(body__iregex=rf"(^|[^a-zA-Z0-9]){re.escape(query)}([^a-zA-Z0-9]|$)"))
+            .filter(Q(score__lt=meta_descriptor_cut_off, label=SemanticIndex.SourceType.META_DESCRIPTOR) |
+                    Q(score__lt=transcript_cut_off, label=SemanticIndex.SourceType.TRANSCRIPT) |
+                    Q(body__iregex=rf"(^|[^a-zA-Z0-9]){re.escape(query)}([^a-zA-Z0-9]|$)"))
 
 class SemanticIndexManager(models.Manager):
     def get_queryset(self):

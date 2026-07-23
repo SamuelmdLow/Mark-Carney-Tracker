@@ -32,4 +32,4 @@ class Query(ObjectType):
         semanticIndices = SemanticIndex.objects.all().semantic_search(query).filter(content_type=content_type)
         return Attachment.objects.select_related("schedule_item"). \
                 filter(semantic_indices__in=semanticIndices).distinct(). \
-                order_by("-published_at")[:100]
+                order_by("-published_at")
