@@ -31,6 +31,9 @@ SECRET_KEY = env('SECRET_KEY', default="SOMETHING_SILLY")
 
 ALLOWED_HOSTS = [env('HTTP_HOST', default='localhost'), 'localhost', '127.0.0.1']
 
+if env('CSRF_TRUSTED_ORIGINS', default=False):
+    CSRF_TRUSTED_ORIGINS = [env('CSRF_TRUSTED_ORIGINS')]
+
 # Application definition
 
 INSTALLED_APPS = [

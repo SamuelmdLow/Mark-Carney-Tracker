@@ -12,6 +12,7 @@ import asyncio
 from asgiref.sync import async_to_sync, sync_to_async
 import datetime
 import copy
+import re
 
 import ffmpeg
 import numpy as np
@@ -83,6 +84,37 @@ class M3U8():
 
     def get_audio_urls(self, name=None):
         return async_to_sync(self.aget_audio_urls)(name=name)
+
+
+def resegment_transcript_to_sentences(segments:list[dict]):    
+    resegmented = []
+    new_segment = {"words":[]}
+
+    for segment in segments:
+        for word in segment["words"]:
+            
+            current_word = word["word"].strip()
+            previous_word = ''
+            
+            if len(new_segment["words"]) > 0:
+                previous_word = new_segment["words"][-1]["word"].strip()
+            
+            prefixes = "(Mr|St|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|Inc|Ltd|Jr|Sr|Co)[.]"
+
+            if (len(current_word) > 0 and current_word[0].isupper()) and (len(previous_word) > 0 and not re.search(prefixes, previous_word) and previous_word[-1] in [".", "?"]):
+                text = "".join(map(lambda w: w["word"], new_segment["words"])).strip()
+                while "  " in text:
+                    text = text.replace("  ", " ")
+                new_segment["text"] = text
+                new_segment["start"] = new_segment["words"][0]["start"]
+                new_segment["end"] = new_segment["words"][-1]["end"]
+                resegmented.append(copy.deepcopy(new_segment))
+
+                new_segment = {"words":[word]}
+            else:
+                new_segment["words"].append(word)
+
+    return resegmented
 
 
 def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=40, overlap=5, sample_rate=16000) -> list[dict]:
@@ -166,7 +198,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
 
         total_duration += duration
 
-    return transcript
+    return resegment_transcript_to_sentences(transcript)
 
 
 def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
@@ -309,7 +341,7 @@ def resegment_transcript_for_embedding(segments) -> list[str]:
 
     def split_gaps(gaps, segments):
         if sum([segment["length"] for segment in segments]) <= max_seq_length or len(segments) <= 1:
-            return ["".join([segment["text"] for segment in segments])]
+            return [" ".join([segment["text"].strip() for segment in segments])]
 
         split_index = np.argmax(gaps)+1
         print(f"{split_index},\n{gaps}\n{len(segments)}")
@@ -484,7 +516,7 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                         return False
 
                 blacklist_terms = [
-                    "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/"]
+                    "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/", "/provincial-politics/"]
 
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False

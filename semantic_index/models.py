@@ -1,12 +1,13 @@
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
-from django.db.models import Case, Value, When, F, Q
+from django.db.models import Case, Value, When, F, Q, Min, Avg
 from django.apps import apps
 
 from pgvector.django import VectorField, CosineDistance
 
 import re
+import math
 
 # Create your models here.
 
@@ -18,15 +19,23 @@ class SemanticIndexQuerySet(models.QuerySet):
         model = apps.get_app_config('semantic_index').model
         query_embedding = model.encode(query)
         
-        return self.alias(
+        scored_index = self.annotate(
                 weight=Case(
                         When(label=SemanticIndex.SourceType.META_DESCRIPTOR, then=Value(1.0)),
                         When(label=SemanticIndex.SourceType.TRANSCRIPT, then=Value(0.75)),
                         default=Value(1.0),
                         ),
                 distance=CosineDistance('embedding', query_embedding), \
-                score=F('distance') / F('weight'),) \
-            .filter(Q(score__lt=0.725) | Q(body__iregex=rf"(^|[^a-zA-Z0-9]){re.escape(query)}([^a-zA-Z0-9]|$)"))
+                score=F('distance') / F('weight'),)
+
+        aggregate = scored_index \
+            .aggregate(min=Min("score"), avg=Avg("score"))
+
+        diff = aggregate['avg'] - aggregate['min']
+        cut_off = aggregate['min'] + math.pow(diff, 2)
+        
+        return scored_index \
+            .filter(Q(score__lt=cut_off) | Q(body__iregex=rf"(^|[^a-zA-Z0-9]){re.escape(query)}([^a-zA-Z0-9]|$)"))
 
 class SemanticIndexManager(models.Manager):
     def get_queryset(self):

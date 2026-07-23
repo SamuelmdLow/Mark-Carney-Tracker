@@ -1,4 +1,5 @@
 from django.contrib.contenttypes.models import ContentType
+from django.db.models import F
 
 import graphene
 from graphene import relay, ObjectType
@@ -15,6 +16,11 @@ class AttachmentNode(DjangoObjectType):
         filter_fields = ["id", "title", "content", "published_at", "source"]
         interfaces = (relay.Node, )
 
+    scored_content = graphene.JSONString(query=graphene.String(required=True))
+
+    def resolve_scored_content(self, info, query):
+        return self.scoreContent(query)
+
 class Query(ObjectType):
     attachment = relay.Node.Field(AttachmentNode)
     all_attachments = DjangoFilterConnectionField(AttachmentNode)
@@ -24,4 +30,6 @@ class Query(ObjectType):
     def resolve_attachments_semantic_search(root, info, query: str):
         content_type = ContentType.objects.get_for_model(Attachment)        
         semanticIndices = SemanticIndex.objects.all().semantic_search(query).filter(content_type=content_type)
-        return Attachment.objects.select_related("schedule_item").filter(semantic_indices__in=semanticIndices).distinct().order_by("-published_at")
+        return Attachment.objects.select_related("schedule_item"). \
+                filter(semantic_indices__in=semanticIndices).distinct(). \
+                order_by("-published_at")[:100]

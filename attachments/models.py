@@ -71,6 +71,25 @@ class Attachment(models.Model):
                 datetime=self.published_at,
                 content_object=self,
             ) for (text, embedding, label) in list(zip(text_segments, embeddings, labels))])
+
+    def scoreContent(self, query):
+        model = apps.get_app_config('semantic_index').model
+        
+        data = self.json
+        if "transcription" in data:
+            sentences = list(map(lambda s: s['text'], data["transcription"]["segments"]))
+            embeddings = model.encode(sentences).tolist()
+            query_embedding = model.encode(query)
+            scores = model.similarity(embeddings, query_embedding).tolist()
+
+            scored_content = data["transcription"]["segments"]
+
+            for i in range(len(scored_content)):
+                scored_content[i]["score"] = scores[i][0]
+
+            return scored_content
+        
+        return []
         
     class Meta:
         ordering = ["-published_at"]
