@@ -29,7 +29,7 @@ class Query(ObjectType):
 
     def resolve_attachments_semantic_search(root, info, query: str, **kwargs):
         content_type = ContentType.objects.get_for_model(Attachment)        
-        semanticIndices = SemanticIndex.objects.all().semantic_search(query).filter(content_type=content_type)
+        ids = [s.object_id for s in SemanticIndex.objects.all().semantic_search(query).filter(content_type=content_type).order_by("object_id").distinct("object_id")]
         return Attachment.objects.select_related("schedule_item"). \
-                filter(semantic_indices__in=semanticIndices).distinct(). \
+                filter(id__in=ids). \
                 order_by("-published_at")

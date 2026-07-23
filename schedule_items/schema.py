@@ -41,6 +41,6 @@ class Query(ObjectType):
 
     def resolve_schedule_item_semantic_search(root, info, query: str, **kwargs):
         content_type = ContentType.objects.get_for_model(ScheduleItem)
-        semanticIndices = SemanticIndex.objects.all().semantic_search(
-            query).filter(content_type=content_type)
-        return ScheduleItem.objects.select_related("location").filter(semantic_indices__in=semanticIndices).distinct().order_by("-datetime")
+        ids = [s.object_id for s in SemanticIndex.objects.all().semantic_search(
+            query).filter(content_type=content_type).order_by("object_id").distinct("object_id")]
+        return ScheduleItem.objects.select_related("location").filter(id__in=ids).distinct().order_by("-datetime")
