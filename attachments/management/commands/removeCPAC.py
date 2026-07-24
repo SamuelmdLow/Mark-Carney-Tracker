@@ -6,6 +6,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         blacklist_terms = [
-            "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/", "/provincial-politics/"]
+            "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/", "/provincial-politics/", "/interviews-with-marc-andre-cossette/"]
         for term in blacklist_terms:
             Attachment.objects.filter(source__contains=term).delete()

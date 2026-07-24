@@ -526,7 +526,7 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                         return False
 
                 blacklist_terms = [
-                    "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/", "/provincial-politics/"]
+                    "/primetime-politics/", "/lessentiel/", "/british-prime-ministers-question-time/", "/provincial-politics/", "/interviews-with-marc-andre-cossette/"]
 
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False
