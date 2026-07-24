@@ -79,7 +79,10 @@ class Attachment(models.Model):
     def scoreContent(self, query):
         model = apps.get_app_config('semantic_index').model
         query_embedding = model.encode(query)
-        return list(self.contents.all().annotate(score=CosineDistance('embedding', query_embedding).order_by("ordering")).values("data", "score"))
+        return list(self.contents.all() \
+                    .annotate(score=1-CosineDistance('embedding', query_embedding)) \
+                    .order_by("ordering") \
+                    .values("data", "score"))
         
     class Meta:
         ordering = ["-published_at"]
