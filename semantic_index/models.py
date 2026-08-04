@@ -33,7 +33,7 @@ class SemanticIndexQuerySet(models.QuerySet):
         
         return scored_index \
             .filter(Q(score__lt=meta_descriptor_cut_off, label=SemanticIndex.SourceType.META_DESCRIPTOR) |
-                    Q(score__lt=transcript_cut_off, label=SemanticIndex.SourceType.TRANSCRIPT) |
+                    Q(score__lt=transcript_cut_off, label=SemanticIndex.SourceType.BODY) |
                     Q(body__iregex=rf"(^|[^a-zA-Z0-9]){re.escape(query)}([^a-zA-Z0-9]|$)"))
 
 class SemanticIndexManager(models.Manager):
@@ -43,7 +43,7 @@ class SemanticIndexManager(models.Manager):
 class SemanticIndex(models.Model):
     class SourceType(models.IntegerChoices):
         META_DESCRIPTOR = 0, "Meta descriptor"
-        TRANSCRIPT = 1, "Transcript"
+        BODY = 1, "Body"
 
     embedding = VectorField(dimensions=384)
     body = models.TextField(max_length=None, default=None, null=True, blank=True)

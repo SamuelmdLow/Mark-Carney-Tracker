@@ -3,7 +3,7 @@ from django.conf import settings
 from django.apps import apps
 
 from attachments.models import Attachment, AttachmentContent
-from attachments.services import M3U8, transcribe_audio, resegment_transcript_for_embedding, resegment_transcript_to_sentences
+from attachments.services import M3U8, transcribe_audio, resegment_body_for_embedding, resegment_transcript_to_sentences
 from attachments.tasks import populate_attachment_data_task, index_attachment
 
 from pm_tracker.celery import app
@@ -18,7 +18,7 @@ class Command(BaseCommand):
     async def handle(self, *args, **options):
         model = apps.get_app_config('semantic_index').model
 
-        unpopulated = []
+        #unpopulated = []
 
         async for attachment in Attachment.objects.all():
             if "transcription" in attachment.json:
@@ -38,8 +38,8 @@ class Command(BaseCommand):
                 attachment.json = json
                 await attachment.asave()
 
-            elif 'video_m3u8' in attachment.json and await attachment.contents.all().acount() == 0:
-                unpopulated.append((attachment.json['video_duration'], attachment.pk))
-        unpopulated.sort(key = lambda a: a[0])
-        for (a, pk) in unpopulated:
-            populate_attachment_data_task.delay(pk)
+        #    elif 'video_m3u8' in attachment.json and await attachment.contents.all().acount() == 0:
+        #        unpopulated.append((attachment.json['video_duration'], attachment.pk))
+        #unpopulated.sort(key = lambda a: a[0])
+        #for (a, pk) in unpopulated:
+        #    populate_attachment_data_task.delay(pk)

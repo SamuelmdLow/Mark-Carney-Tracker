@@ -59,7 +59,7 @@ class Location(models.Model):
 
 class ScheduleItemManager(models.Manager):
     
-    async def get_time_relevant(self, contents:list[str], publish_time:datetime.datetime) -> (None | ScheduleItem):
+    async def get_time_relevant(self, contents:list[str], publish_time:datetime.datetime, exclude:list[int]=[]) -> (None | ScheduleItem):
         '''
         Find the most relevant ScheduleItem object based on contents and publish_time
 
@@ -78,21 +78,21 @@ class ScheduleItemManager(models.Manager):
                     content_type=schedule_item_content_type,
                     datetime__lte=publish_time + datetime.timedelta(days=1),
                     datetime__gte=publish_time - datetime.timedelta(days=1)
-                ) \
+                ).exclude(id__in=exclude) \
                 .alias(
                     time_proximity=Abs(
                         Extract(F("datetime") - publish_time, "epoch")),
                     cosine_distance=CosineDistance("embedding", embedding)
                 ) \
                 .annotate(
-                    score=F("cosine_distance")) \
+                    score=F("cosine_distance"))\
                 .order_by("score") \
                 .afirst()
 
         matches = await asyncio.gather(*[match_embedding(embedding) for embedding in embeddings])
 
         best_match = min(
-            matches, key=lambda match: match.score if match else float("-inf"))
+            matches, key=lambda match: match.score if match else float("inf"))
 
         if not best_match:
             return None
@@ -103,7 +103,7 @@ class ScheduleItemManager(models.Manager):
 
         if best_match.score < THRESHOLD:
             best = await sync_to_async(lambda: best_match.content_object)()
-            print(f"{best_match.score} {(publish_time-best_match.datetime).total_seconds() / (24 * 3600)}d\n        - {publish_time} - {best_match.datetime}\n        - {best.content}\n        - {" - ".join(contents)}\n")
+            print(f"{best_match.score} {(publish_time-best_match.datetime).total_seconds() / (24 * 3600)}d\n        - {publish_time} - {best_match.datetime}\n        - {best.content}\n        - {" - ".join(contents[:3])}\n")
             return best
 
         return None

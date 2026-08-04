@@ -41,29 +41,33 @@ class Attachment(models.Model):
         return self.title
 
     def index(self):
-        from attachments.services import resegment_transcript_for_embedding
+        from attachments.services import resegment_body_for_embedding
 
         attachment_content_type = ContentType.objects.get_for_model(self)
         
         SemanticIndex.objects.filter(content_type=attachment_content_type, object_id=self.id).delete()
  
         model = apps.get_app_config('semantic_index').model
-          
-        text_segments = [self.title, self.content]
 
         def modify_text(string:str):
             string = string.replace("PM Carney", "Prime Minister Mark Carney")
             string = string.replace("PM Mark Carney", "Prime Minister Mark Carney")
             return string
 
-        text_segments = list(map(modify_text, text_segments))
-        labels = 2 * [SemanticIndex.SourceType.META_DESCRIPTOR]
+        text_segments = [self.title]
+        labels = [SemanticIndex.SourceType.META_DESCRIPTOR]
 
-        contents = [c.data for c in self.contents.all()]
+        if "description" in self.json:
+            text_segments.append(self.json["description"])
+            labels.append(SemanticIndex.SourceType.META_DESCRIPTOR)
+
+        text_segments = list(map(modify_text, text_segments))
+
+        contents = [c['data'] for c in self.contents.all().order_by("ordering").values("data")]
 
         if len(contents) > 0:
-            text_segments += [segment["text"] for segment in resegment_transcript_for_embedding(contents)]      
-            labels += len(contents) * [SemanticIndex.SourceType.TRANSCRIPT]
+            text_segments += [segment["text"] for segment in resegment_body_for_embedding(contents)]      
+            labels += len(contents) * [SemanticIndex.SourceType.BODY]
 
         embeddings = model.encode(text_segments).tolist()
             

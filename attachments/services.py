@@ -87,23 +87,24 @@ class M3U8():
         return async_to_sync(self.aget_audio_urls)(name=name)
 
 
-def resegment_transcript_to_sentences(segments:list[dict]):    
+def resegment_transcript_to_sentences(segments: list[dict]):
     resegmented = []
-    new_segment = {"words":[]}
+    new_segment = {"words": []}
 
     for segment in segments:
         for word in segment["words"]:
-            
+
             current_word = word["word"].strip()
             previous_word = ''
-            
+
             if len(new_segment["words"]) > 0:
                 previous_word = new_segment["words"][-1]["word"].strip()
-            
+
             prefixes = "(Mr|St|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|Inc|Ltd|Jr|Sr|Co)[.]"
 
             if (len(current_word) > 0 and current_word[0].isupper()) and (len(previous_word) > 0 and not re.search(prefixes, previous_word) and previous_word[-1] in [".", "?"]):
-                text = "".join(map(lambda w: w["word"], new_segment["words"])).strip()
+                text = "".join(
+                    map(lambda w: w["word"], new_segment["words"])).strip()
                 while "  " in text:
                     text = text.replace("  ", " ")
                 new_segment["text"] = text
@@ -111,7 +112,7 @@ def resegment_transcript_to_sentences(segments:list[dict]):
                 new_segment["end"] = new_segment["words"][-1]["end"]
                 resegmented.append(copy.deepcopy(new_segment))
 
-                new_segment = {"words":[word]}
+                new_segment = {"words": [word]}
             else:
                 new_segment["words"].append(word)
 
@@ -299,11 +300,12 @@ def populate_attachment_data(attachment) -> Attachment:
         m3u8.load(m3u8_base_url)
         audio_urls = m3u8.get_audio_urls()
 
-        segments = audio_urls_to_transcription(audio_urls, initial_prompt=attachment.content)
+        segments = audio_urls_to_transcription(
+            audio_urls, initial_prompt=attachment.content)
 
         model = apps.get_app_config('semantic_index').model
         embeddings = model.encode([s['text'] for s in segments]).tolist()
-        
+
         AttachmentContent.objects.filter(attachment=attachment).delete()
         AttachmentContent.objects.bulk_create(
             [AttachmentContent(
@@ -311,23 +313,21 @@ def populate_attachment_data(attachment) -> Attachment:
                 ordering=segment['start'],
                 data=segment,
                 embedding=embedding) for (segment, embedding) in zip(segments, embeddings)])
-            
 
     attachment.save()
     return attachment
 
 
-def resegment_transcript_for_embedding(segments, min_segment_length=15) -> list[str]:
+def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
     '''
-    Concat transcript segments into groups that are semantically similar and temporally close, so that they can be embedded together. Returns a list of strings.
+    Concat body segments into groups that are semantically similar (and temporally close if transcript), so that they can be embedded together. Returns a list of strings.
     '''
 
     MIN_SEGMENT_LENGTH = min_segment_length
 
     model = apps.get_app_config('semantic_index').model
 
-    segments = list(filter(lambda s: len(
-        s["text"]) > MIN_SEGMENT_LENGTH, copy.deepcopy(segments)))
+    segments = copy.deepcopy(segments)
 
     embeddings = model.encode([segment["text"] for segment in segments])
 
@@ -337,27 +337,39 @@ def resegment_transcript_for_embedding(segments, min_segment_length=15) -> list[
 
     gap_scores = []
     for i in range(len(segments) - 1):
-        time_gap = np.max([0.01, segments[i+1]["start"] - segments[i]["end"]])
         semantic_gap = 1 - \
             model.similarity(embeddings[i+1], embeddings[i]).tolist()[0][0]
 
-        gap_scores.append(np.log(time_gap) * semantic_gap)
+        if "start" in segments[i+1] and "end" in segments[i]:
+            time_gap = np.max(
+                [0.01, segments[i+1]["start"] - segments[i]["end"]])
+            gap_scores.append(np.log(time_gap) * semantic_gap)
+        else:
+            gap_scores.append(semantic_gap)
 
     max_seq_length = model.max_seq_length
 
     def split_gaps(gaps, segments):
         if sum([segment["length"] for segment in segments]) <= max_seq_length or len(segments) <= 1:
-            return [{
-                "start": segments[0]["start"],
-                "end": segments[-1]["end"],
+            merged_segment = {
                 "text": " ".join([segment["text"].strip() for segment in segments]),
-                "words": list(itertools.chain.from_iterable([segment["words"] for segment in segments])),
-            }]
+            }
+            if "words" in segments[0]:
+                merged_segment["words"] = list(itertools.chain.from_iterable(
+                    [segment["words"] for segment in segments]))
+            if "start" in segments[0] and "end" in segments[-1]:
+                merged_segment["start"] = segments[0]["start"]
+                merged_segment["end"] = segments[-1]["end"]
+
+            return [merged_segment]
 
         split_index = np.argmax(gaps)+1
         return split_gaps(gaps[:split_index-1], segments[:split_index]) + split_gaps(gaps[split_index:], segments[split_index:])
 
     segmented_texts = split_gaps(gap_scores, segments)
+
+    segmented_texts = list(filter(lambda s: len(
+            s["text"]) > MIN_SEGMENT_LENGTH, segmented_texts))
 
     return segmented_texts
 
@@ -452,6 +464,7 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                     json["video_m3u8"] = video
                     json["video_poster"] = image,
                     json["video_duration"] = video_duration.total_seconds()
+                    json["description"] = description
                     attachment.json = json
 
                     attachment.schedule_item = schedule_item
@@ -465,6 +478,7 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                             "video_m3u8": video,
                             "video_poster": image,
                             "video_duration": video_duration.total_seconds(),
+                            "description": description,
                         },
                         schedule_item=schedule_item
                     )

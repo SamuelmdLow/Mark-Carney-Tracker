@@ -7,7 +7,7 @@ from semantic_index.models import SemanticIndex, SemanticIndexManager
 
 class SemanticIndexAdmin(admin.ModelAdmin):
     ordering = ["-datetime"]
-    list_display = ["content_object", "body", "datetime", "content_type"]
+    list_display = ["content_object", "body", "datetime", "content_type", "label"]
     search_fields = ["body"]
 
 admin.site.register(SemanticIndex, SemanticIndexAdmin)
