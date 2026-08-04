@@ -11,8 +11,11 @@ import datetime
 from bs4 import BeautifulSoup
 import re
 import aiohttp
+from aiolimiter import AsyncLimiter
 import asyncio
-from asgiref.sync import sync_to_async
+from asgiref.sync import async_to_sync, sync_to_async
+
+RATE_LIMIT = 0.2
 
 
 async def pm_website_get_index_page_HTML(page: int, session: aiohttp.ClientSession) -> str:
@@ -20,11 +23,13 @@ async def pm_website_get_index_page_HTML(page: int, session: aiohttp.ClientSessi
     Uses the strange api for pm.gc.ca to get and return HTML for an index page, given a page number
     '''
     data = f"view_name=news&view_display_id=page_1&view_args=1,2,3,4,5,6,7&page={page}"
+    print(f"{page}")
     async with session.post(
         "https://www.pm.gc.ca/views/ajax",
         data=data,
         headers={'content-type': 'application/x-www-form-urlencoded; charset=UTF-8'}
     ) as response:
+        print(f"{page} {response.url}")
         data = await response.json()
         html = ""
         for d in data:
@@ -64,8 +69,15 @@ async def pm_website_get_all_ids(session: aiohttp.ClientSession) -> list[int]:
     last = int(soup.find("li", class_="pager__item--last").a['href'][6:])
 
     perPageIds = [pm_website_get_ids(soup)]
-    tasks = [pm_website_get_ids_from_index(
-        i, session) for i in range(2, last+1)]
+
+    limiter = AsyncLimiter(1, RATE_LIMIT)
+
+    async def controlled_pm_website_get_ids_from_index(id):
+        async with limiter:
+            return await pm_website_get_ids_from_index(id, session)
+
+    tasks = [controlled_pm_website_get_ids_from_index(
+        i) for i in range(2, last+1)]
     perPageIds += await asyncio.gather(*tasks)
 
     ids = []
@@ -104,47 +116,58 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
         publish_time = getPublishTime(soup)
         title = soup.find("div", class_="title-header-inner").find("h1").get_text()
         container = soup.find("div", class_="content-news-article").find("div", class_="field--name-body")
-        contents = [title] + [repr(string) for string in container.stripped_strings]
+        contents = [title] + [repr(string) for string in container.stripped_strings if string]
 
         child_elems = [child for child in container.children if child.name is not None]
 
-        exclude = []
-        excluded = await ScheduleItem.objects.filter(source=url).afirst()
-        if excluded:
-            exclude = [excluded.pk]
+        def updateOrCreateAttachment(url:str, title:str, publish_time: datetime.datetime) -> Attachment:
+            '''
+            This is synchronous to avoid race conditions
+            '''
+            exclude = []
+            excluded = ScheduleItem.objects.filter(source=url).first()
+            if excluded:
+                exclude = [excluded.pk]
 
-        schedule_item = await ScheduleItem.objects.get_time_relevant(contents, publish_time, exclude=exclude)
+            schedule_item = async_to_sync(ScheduleItem.objects.get_time_relevant)(contents, publish_time, exclude=exclude)
 
-        if excluded:
-            if schedule_item:
-                await excluded.adelete()
+            if excluded:
+                if schedule_item:
+                    for attachment in excluded.attachments.all():
+                        attachment.schedule_item = schedule_item
+                        attachment.save()
+                    excluded.delete()
+                else:
+                    schedule_item = excluded
+                    schedule_item.content = title
+                    schedule_item.save()
+            elif not schedule_item:
+                schedule_item = ScheduleItem.objects.create(
+                    source=url,
+                    datetime=publish_time,
+                    location=async_to_sync(getLocation)(soup),
+                    content=title,
+                )
+                index_schedule_item.delay_on_commit(schedule_item.pk)
+
+            if Attachment.objects.filter(source=url).exists():
+                attachment = Attachment.objects.filter(source=url).first()
+                attachment.title = title
+                attachment.schedule_item = schedule_item
+                attachment.save()
             else:
-                schedule_item = excluded
-                schedule_item.content = title
-                await schedule_item.asave()
-        elif not schedule_item:
-            schedule_item = await ScheduleItem.objects.acreate(
-                source=url,
-                datetime=publish_time,
-                location=await getLocation(soup),
-                content=title,
-            )
-            await sync_to_async(index_schedule_item.delay_on_commit)(schedule_item.pk)
+                attachment = Attachment.objects.create(
+                    schedule_item=schedule_item,
+                    published_at=publish_time,
+                    json={},
+                    title=title,
+                    content='',
+                    source=url
+                )
 
-        if await Attachment.objects.filter(source=url).aexists():
-            attachment = await Attachment.objects.filter(source=url).afirst()
-            attachment.title = title
-            attachment.schedule_item = schedule_item
-            await attachment.asave()
-        else:
-            attachment = await Attachment.objects.acreate(
-                schedule_item=schedule_item,
-                published_at=publish_time,
-                json={},
-                title=title,
-                content='',
-                source=url
-            )
+            return attachment
+
+        attachment = await sync_to_async(updateOrCreateAttachment)(url, title, publish_time)
 
         model = apps.get_app_config('semantic_index').model
         embeddings = model.encode(contents).tolist()
@@ -301,24 +324,24 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
 
         return created
 
+    try:
+        nodeUrl = f"https://www.pm.gc.ca/en/node/{id}"
+        async with session.get(nodeUrl) as response:
+            url = str(response.url)
+            print(url)
 
-    nodeUrl = f"https://www.pm.gc.ca/en/node/{id}"
-    async with session.get(nodeUrl) as response:
-        url = str(response.url)
-        print(url)
+            date_from_url = url.split("/")[-1].replace("update-", "")
 
-        date_from_url = url.split("/")[-1].replace("update-", "")
+            soup = BeautifulSoup(await response.text(), features="html.parser")
 
-        soup = BeautifulSoup(await response.text(), features="html.parser")
+            if "media-advisories" in url:
+                return await parse_media_advisory_page(url, soup)
+            else:
+                return await parse_standard_press_release(url, soup)
 
-        if "media-advisories" in url:
-            return await parse_media_advisory_page(url, soup)
-        else:
-            return await parse_standard_press_release(url, soup)
-
-    #except:
-    #    print(f"Failed scraping {nodeUrl}")
-    #    return None
+    except:
+        print(f"Failed scraping {nodeUrl}")
+        return None
 
 
 async def pm_website_create_all():
@@ -326,12 +349,16 @@ async def pm_website_create_all():
     Find all media advisory pages and save ScheduleItems from the content 
     '''
     async with aiohttp.ClientSession() as session:
+        limiter = AsyncLimiter(1, RATE_LIMIT)
+
+        async def controlled_pm_website_create_schedule_items_from_page(id):
+            async with limiter:
+                await pm_website_create_schedule_items_from_page(id, session)
 
         ids = await pm_website_get_all_ids(session)
 
-        tasks = [pm_website_create_schedule_items_from_page(
-            id, session) for id in ids]
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*[controlled_pm_website_create_schedule_items_from_page(
+            id) for id in ids])
 
 
 async def pm_website_scrape_recent():

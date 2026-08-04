@@ -26,6 +26,7 @@ def cpac_create_from_url_task(url: str, populate:bool=True):
     attachment = async_to_sync(cpac_page_to_attachment)(url)
     if attachment:
         attachment.save()
+        index_attachment.delay_on_commit(attachment.pk)
         if populate:
             populate_attachment_data_task.delay_on_commit(attachment.pk)
         return attachment

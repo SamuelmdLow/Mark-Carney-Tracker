@@ -1,17 +1,15 @@
 from django.apps import apps
 from django.db import models
-from django.db.models import DateTimeField, CharField, FloatField, URLField, ForeignKey
+from django.db.models import DateTimeField, CharField, FloatField, URLField, ForeignKey, F, Value
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericRelation
-from django.db.models import F
-from django.db.models.functions import Extract, Abs
+from django.db.models.functions import Extract, Abs, Log
 from pgvector.django import CosineDistance
 
 from semantic_index.models import SemanticIndex
 
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
-
 import datetime
 import asyncio
 from asgiref.sync import sync_to_async
@@ -25,11 +23,18 @@ class LocationManager(models.Manager):
         '''
         geolocator = Nominatim(user_agent="carneyTracker")
 
-        if not False in map(lambda s: s in geoname, ["National Capital Region", "Canada"]):
+        if any(s in geoname for s in ["National Capital Region", "Canada"]):
             geoname = "Ottawa, Ontario"
+
+        geoname = geoname.replace("National Historic Site", "") # due to https://www.pm.gc.ca/en/news/media-advisories/2026/07/21/wednesday-july-22-2026
+        geoname = geoname.replace("Nunastsiaq", "Northwest Territories") # due to https://www.pm.gc.ca/en/news/news-releases/2025/07/24/kanatup-siluviuqtimmarigat-carney-ammaly-inuit-sivuluiqtit-katimay
 
         if not await Location.objects.filter(name=geoname).aexists():
             geocode = geolocator.geocode(geoname)
+            
+            if geocode is None:
+                raise ValueError(f"Could not geocode location: {geoname}")
+            
             obj = TimezoneFinder()
             timezone = obj.timezone_at(lng=geocode.longitude, lat=geocode.latitude)
             
@@ -59,7 +64,7 @@ class Location(models.Model):
 
 class ScheduleItemManager(models.Manager):
     
-    async def get_time_relevant(self, contents:list[str], publish_time:datetime.datetime, exclude:list[int]=[]) -> (None | ScheduleItem):
+    async def get_time_relevant(self, contents:list[str], publish_time:datetime.datetime, exclude:list[int]=[], max_cosine_distance:float=0.6) -> (None | ScheduleItem):
         '''
         Find the most relevant ScheduleItem object based on contents and publish_time
 
@@ -77,15 +82,16 @@ class ScheduleItemManager(models.Manager):
                 .filter(
                     content_type=schedule_item_content_type,
                     datetime__lte=publish_time + datetime.timedelta(days=1),
-                    datetime__gte=publish_time - datetime.timedelta(days=1)
-                ).exclude(id__in=exclude) \
+                    datetime__gte=publish_time - datetime.timedelta(days=1),    
+                ).exclude(object_id__in=exclude) \
                 .alias(
                     time_proximity=Abs(
                         Extract(F("datetime") - publish_time, "epoch")),
                     cosine_distance=CosineDistance("embedding", embedding)
                 ) \
+                .filter(cosine_distance__lt=max_cosine_distance) \
                 .annotate(
-                    score=F("cosine_distance"))\
+                    score=F("cosine_distance") * F("cosine_distance") * Log(Value(10), F("time_proximity") + 1))\
                 .order_by("score") \
                 .afirst()
 
@@ -97,13 +103,12 @@ class ScheduleItemManager(models.Manager):
         if not best_match:
             return None
 
-        THRESHOLD = 0.6
-        if "carney" not in "".join(contents).lower():
-            THRESHOLD = 0.5
+        THRESHOLD = 0.8
 
         if best_match.score < THRESHOLD:
             best = await sync_to_async(lambda: best_match.content_object)()
             print(f"{best_match.score} {(publish_time-best_match.datetime).total_seconds() / (24 * 3600)}d\n        - {publish_time} - {best_match.datetime}\n        - {best.content}\n        - {" - ".join(contents[:3])}\n")
+
             return best
 
         return None

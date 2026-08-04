@@ -1,6 +1,9 @@
+from importlib.resources import contents
+
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from pgvector.django import CosineDistance
+from torchgen import model
 
 from semantic_index.models import SemanticIndex
 from schedule_items.models import ScheduleItem
@@ -85,6 +88,24 @@ class M3U8():
 
     def get_audio_urls(self, name=None):
         return async_to_sync(self.aget_audio_urls)(name=name)
+
+
+def resegment_body_to_sentences(segments: list[dict]):
+    if len(segments) == 0:
+        return []
+
+    if "words" in segments[0]:
+        return resegment_transcript_to_sentences(segments)
+    else:
+        resegmented = []
+        deliminator = r'((?<!Mr)(?<!St)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!Prof)(?<!Capt)(?<!Cpt)(?<!Lt)(?<!Inc)(?<!Ltd)(?<!Jr)(?<!Sr)(?<!Co)[.]|[?]|[!])\s+'
+
+        for segment in segments:
+            splitted = re.split(deliminator, segment["text"])
+            splitted = ["".join(splitted[i:i+2])
+                        for i in range(0, len(splitted), 2)]
+            resegmented += [{"text": text} for text in splitted if text]
+        return resegmented
 
 
 def resegment_transcript_to_sentences(segments: list[dict]):
@@ -350,7 +371,7 @@ def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
     max_seq_length = model.max_seq_length
 
     def split_gaps(gaps, segments):
-        if sum([segment["length"] for segment in segments]) <= max_seq_length or len(segments) <= 1:
+        if sum([segment["length"] for segment in segments]) <= max_seq_length:
             merged_segment = {
                 "text": " ".join([segment["text"].strip() for segment in segments]),
             }
@@ -363,13 +384,43 @@ def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
 
             return [merged_segment]
 
+        if len(segments) <= 1:
+
+            def split_when_required(segment):
+                tokens = len(model.tokenizer.encode(
+                    segment["text"], add_special_tokens=True))
+                if tokens > max_seq_length:
+                    if "words" in segment:
+                        mid = len(segment["words"]) // 2
+                        return split_when_required({"text": " ".join([word["word"] for word in segment["words"][:mid]]),
+                                    "words": segment["words"][:mid],
+                                    "start": segment["words"][0]["start"],
+                                    "end": segment["words"][mid-1]["end"],
+                                    }) + \
+                                split_when_required({"text": " ".join([word["word"] for word in segment["words"][mid:]]), 
+                                    "words": segment["words"][mid:],
+                                    "start": segment["words"][mid]["start"],
+                                    "end": segment["words"][-1]["end"]})
+                    else:
+                        words = segment["text"].split(" ")
+                        mid = len(words) // 2
+                        return split_when_required({"text": " ".join(words[:mid])}) + \
+                                split_when_required({"text": " ".join(words[mid:])})
+                return [segment]
+
+            resegmented = []
+            for segment in resegment_body_to_sentences(segments):
+                resegmented += split_when_required(segment)
+            print(resegmented)
+            return resegmented
+
         split_index = np.argmax(gaps)+1
         return split_gaps(gaps[:split_index-1], segments[:split_index]) + split_gaps(gaps[split_index:], segments[split_index:])
 
     segmented_texts = split_gaps(gap_scores, segments)
 
     segmented_texts = list(filter(lambda s: len(
-            s["text"]) > MIN_SEGMENT_LENGTH, segmented_texts))
+        s["text"]) > MIN_SEGMENT_LENGTH, segmented_texts))
 
     return segmented_texts
 
@@ -430,7 +481,13 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                     # so we tend to use lastdatemodified time instead, unless a large departure.
                     attachment_datetime = livedatetime
 
-                schedule_item = await ScheduleItem.objects.get_time_relevant([title, description], attachment_datetime)
+                contents = title.split(":") +[description]
+                threshold = 0.6
+                if "carney" not in "".join(contents).lower():
+                    threshold = 0.5
+                schedule_item = await ScheduleItem.objects.get_time_relevant(contents, attachment_datetime, max_cosine_distance=threshold)
+
+                query = str(response.url).split("?")[-1]
 
                 if not schedule_item:
                     # Replace with creation of schedule item from attachment content
@@ -451,9 +508,9 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                             source=response.url,
                         )
                     else:
+                        await Attachment.objects.filter(source__endswith=query).adelete()
                         return None
 
-                query = str(response.url).split("?")[-1]
                 attachment = await Attachment.objects.filter(source__endswith=query).afirst()
                 if attachment:
                     attachment.title = title
@@ -598,7 +655,7 @@ async def cpac_create_attachments_from_urls(urls: list[str]) -> list[Attachment]
 
     attachments = list(filter(lambda a: a is not None, attachments))
 
-    print(f"Creating {len(attachments)} attachments...")
+    print(f"Creating {len(attachments)} attachments... {"\n     - ".join([a.source for a in attachments])}")
     return await sync_to_async(Attachment.objects.bulk_create_and_index)(attachments)
 
 
