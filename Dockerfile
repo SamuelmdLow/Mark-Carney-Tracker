@@ -8,4 +8,6 @@ COPY . /app/
 RUN sudo apt-get update
 RUN sudo apt-get install -y ffmpeg 
 
+RUN pip install -r requirements.txt
+
 EXPOSE 8000

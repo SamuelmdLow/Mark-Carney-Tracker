@@ -169,8 +169,10 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
 
         attachment = await sync_to_async(updateOrCreateAttachment)(url, title, publish_time)
 
+        body = [child.get_text() for child in child_elems]
+
         model = apps.get_app_config('semantic_index').model
-        embeddings = model.encode(contents).tolist()
+        embeddings = model.encode(body).tolist()
 
         previous_html = "".join([content.data['html'] async for content in AttachmentContent.objects.filter(attachment=attachment)])
         current_html = "".join([child.prettify() for child in child_elems])
