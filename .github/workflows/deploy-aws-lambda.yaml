@@ -25,3 +25,5 @@ jobs:
         with:
           function-name: pmLogTranscribe
           code-artifacts-dir: ./dist/pmLogTranscribe
+          runtime: python3.14
+          handler: lambda_function.lambda_handler
