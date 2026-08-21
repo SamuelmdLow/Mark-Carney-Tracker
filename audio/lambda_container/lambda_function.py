@@ -15,7 +15,4 @@ def handler(event, context):
     m3u8.load(m3u8_base_url)
     segments = m3u8.transcribe(model, initial_prompt=initial_prompt)
 
-    return {
-        'statusCode': 200,
-        'body': json.dumps(segments)
-    }
+    return segments

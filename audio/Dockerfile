@@ -3,6 +3,9 @@ FROM public.ecr.aws/lambda/python:3.12
 # Copy requirements.txt
 COPY lambda_container/requirements.txt ${LAMBDA_TASK_ROOT}
 
+RUN sudo apt-get update
+RUN sudo apt-get install -y ffmpeg 
+
 # Install the specified packages
 RUN pip install -r requirements.txt
 
