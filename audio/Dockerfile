@@ -10,8 +10,8 @@ RUN mkdir -p ffmpeg && \
     rm ffmpeg-release-amd64-static.tar.xz
 RUN chmod -R +x ffmpeg
 
-RUN cp ffmpeg /usr/bin/ffmpeg
-RUN cp ffmpeg /bin/ffmpeg
+RUN cp ffmpeg ./usr/bin/ffmpeg
+RUN cp ffmpeg ./bin/ffmpeg
 
 # Copy requirements.txt
 COPY lambda_container/requirements.txt ${LAMBDA_TASK_ROOT}
