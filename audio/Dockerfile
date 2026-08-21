@@ -1,10 +1,15 @@
 FROM public.ecr.aws/lambda/python:3.12
 
-RUN sudo dnf install wget -y
-
-RUN wget -O ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
-
-RUN tar xvf ffmpeg.tar.xz
+RUN dnf install -y tar xz wget
+RUN mkdir -p ffmpeg && \
+    cd ffmpeg && \
+    wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
+    tar -xvf ffmpeg-release-amd64-static.tar.xz && \
+    mv ffmpeg-*-amd64-static/* . && \
+    rm -rf ffmpeg-*-amd64-static && \
+    rm ffmpeg-release-amd64-static.tar.xz
+RUN chmod -R +x /ffmpeg
+ENV PATH="/ffmpeg:${PATH}"
 
 # Copy requirements.txt
 COPY lambda_container/requirements.txt ${LAMBDA_TASK_ROOT}
