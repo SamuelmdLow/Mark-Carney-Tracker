@@ -9,7 +9,7 @@ def handler(event, context):
 
     initial_prompt = None
     if "initial_prompt" in event:
-        initial_prompt = event['inital_prompt']
+        initial_prompt = event['initial_prompt']
 
     m3u8 = M3U8()
     m3u8.load(m3u8_base_url)
