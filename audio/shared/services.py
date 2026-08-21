@@ -1,6 +1,7 @@
 import ffmpeg
 import numpy as np
 
+
 def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
     clip_audios = list(
         map(lambda url: ffmpeg.input(url), urls))
@@ -20,11 +21,18 @@ def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
 
 
 def audio_urls_to_np(urls: list[str], sample_rate=16000):
-    audio_ffmpeg = audio_urls_to_ffmpeg(urls, sample_rate=sample_rate)
-    audio = np.frombuffer(audio_ffmpeg, np.int16).flatten().astype(
-        np.float32) / 32768.0
+    audio = np.array([])
+    segment_durations = []
+    for url in urls:
+        audio_ffmpeg = audio_urls_to_ffmpeg([url], sample_rate=sample_rate)
+        audio_np = np.frombuffer(audio_ffmpeg, np.int16).flatten().astype(
+            np.float32) / 32768.0
+        
+        segment_durations.append(len(audio_np)/sample_rate)
+        audio = np.concatenate((audio, audio_np))
 
-    return audio
+    return audio, segment_durations
+
 
 def transcribe_audio(model, audio, initial_prompt="") -> list[dict]:
 
@@ -65,11 +73,14 @@ def transcribe_audio(model, audio, initial_prompt="") -> list[dict]:
         - Saskatoon, Regina, Prince Albert, Moose Jaw, Swift Current
      - Yukon, Premier: Currie Dixon
         - Whitehorse, Dawson City, Watson Lake, Haines Junction, Carmacks
+
+    Canada–United States–Mexico Agreement (CUSMA)
     '''
 
     initial_prompt = reference_prompt + " " + initial_prompt
 
-    result = model.transcribe(audio, word_timestamps=True, initial_prompt=initial_prompt)
+    result = model.transcribe(
+        audio, word_timestamps=True, initial_prompt=initial_prompt)
 
     def reduce_words(word: dict):
         return {
