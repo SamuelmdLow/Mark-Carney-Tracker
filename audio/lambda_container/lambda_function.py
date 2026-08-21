@@ -2,7 +2,7 @@ import whisper
 
 from shared.services import M3U8
 
-model = whisper.load_model('turbo')
+model = whisper.load_model('turbo', download_root="tmp/whisper")
 
 def handler(event, context):
     m3u8_base_url = context['video_m3u8']
