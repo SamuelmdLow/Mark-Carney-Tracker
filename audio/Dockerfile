@@ -8,7 +8,7 @@ RUN mkdir -p ffmpeg && \
     mv ffmpeg-*-amd64-static/* . && \
     rm -rf ffmpeg-*-amd64-static && \
     rm ffmpeg-release-amd64-static.tar.xz
-RUN chmod -R +x /ffmpeg
+RUN chmod -R +x ffmpeg
 ENV PATH="/ffmpeg:${PATH}"
 
 # Copy requirements.txt
