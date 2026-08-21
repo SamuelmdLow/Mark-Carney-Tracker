@@ -9,7 +9,7 @@ import numpy as np
 
 class M3U8():
 
-    async def aload(self, m3u8_url_base: str) -> M3U8:
+    async def aload(self, m3u8_url_base: str):
         '''
         Sets up a M3U8 object from a m3u8_url
         '''
@@ -41,7 +41,7 @@ class M3U8():
 
                 return self
 
-    def load(self, m3u8_url_base: str) -> M3U8:
+    def load(self, m3u8_url_base: str):
         return async_to_sync(self.aload)(m3u8_url_base)
 
     async def aget_audio_urls(self, name=None) -> list[str]:
