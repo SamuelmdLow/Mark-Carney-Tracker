@@ -8,7 +8,7 @@ def handler(event, context):
     m3u8_base_url = event['video_m3u8']
 
     initial_prompt = None
-    if "initial_promt" in event:
+    if "initial_prompt" in event:
         initial_prompt = event['inital_prompt']
 
     m3u8 = M3U8()

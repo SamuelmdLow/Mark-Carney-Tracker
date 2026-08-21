@@ -173,6 +173,8 @@ def audio_urls_to_transcription(model, urls: list[str], initial_prompt=None, gro
     for group in grouped_urls:
         audio = audio_urls_to_ffmpeg(group, sample_rate=sample_rate)
 
+        if initial_prompt == None:
+            initial_prompt = ""
         initial_prompt = initial_prompt + " " + \
             " ".join([segment["text"] for segment in transcript])
 
