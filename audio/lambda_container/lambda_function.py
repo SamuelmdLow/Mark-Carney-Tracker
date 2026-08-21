@@ -1,10 +1,11 @@
+import json
 import whisper
 from shared.services import transcribe_audio, audio_urls_to_np
 
 model = whisper.load_model('turbo', download_root="tmp/whisper")
 
 def handler(event, context):
-    audio_urls = event['audio_urls']
+    audio_urls = json.loads(event['audio_urls'])
     audio = audio_urls_to_np(audio_urls)
 
     initial_prompt = None
