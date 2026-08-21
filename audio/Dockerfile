@@ -1,5 +1,7 @@
 FROM public.ecr.aws/lambda/python:3.12
 
+RUN yum -y install wget
+
 RUN wget -O ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
 
 RUN tar xvf ffmpeg.tar.xz
