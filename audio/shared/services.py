@@ -1,3 +1,31 @@
+import ffmpeg
+import numpy as np
+
+def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
+    clip_audios = list(
+        map(lambda url: ffmpeg.input(url), urls))
+
+    try:
+        out, _ = (
+            ffmpeg
+            .concat(*clip_audios, v=0, a=1)
+            .output('pipe:', format='s16le', acodec='pcm_s16le', ac=1, ar=str(sample_rate))
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        return out
+    except ffmpeg.Error as e:
+        print('stdout:', e.stdout.decode('utf8'))
+        print('stderr:', e.stderr.decode('utf8'))
+        raise e
+
+
+def audio_urls_to_np(urls: list[str], sample_rate=16000):
+    audio_ffmpeg = audio_urls_to_ffmpeg(urls, sample_rate=sample_rate)
+    audio = np.frombuffer(audio_ffmpeg, np.int16).flatten().astype(
+        np.float32) / 32768.0
+
+    return audio
+
 def transcribe_audio(model, audio, initial_prompt="") -> list[dict]:
 
     reference_prompt = '''
