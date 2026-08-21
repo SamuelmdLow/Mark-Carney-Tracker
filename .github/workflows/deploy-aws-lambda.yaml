@@ -42,7 +42,7 @@ jobs:
       - name: Deploy Lambda function with container image
         uses: aws-actions/aws-lambda-deploy@v1.1.0
         with:
-          function-name: my-container-function
+          function-name: pmLogTranscribeContainerFunction
           package-type: Image  # Required: Indicates container deployment (not zip)
           image-uri: ${{ steps.build-image.outputs.image }}  # ECR image URI from previous step
           role: arn:aws:iam::184141950137:role/GitHubActionAWSLambdaRole  # IAM execution role for Lambda
