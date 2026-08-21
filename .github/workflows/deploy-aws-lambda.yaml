@@ -13,17 +13,37 @@ jobs:
       contents: read  # Required to check out the repository
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::184141950137:role/GitHubActionAWSLambdaRole
           aws-region: us-east-2
       
-      - name: Deploy Lambda Function
-        uses: aws-actions/aws-lambda-deploy@v1
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        # Authenticates with ECR and returns the registry URL for building images
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: pmlog/transcribe
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build Docker image from Dockerfile in repository root
+          docker build -t 184141950137.dkr.ecr.us-east-2.amazonaws.com/pmlog/transcribe:latest ./audio
+          # Push the built image to ECR repository
+          docker push 184141950137.dkr.ecr.us-east-2.amazonaws.com/pmlog/transcribe:latest
+          # Output the full image URI for the next step
+          echo "image=184141950137.dkr.ecr.us-east-2.amazonaws.com/pmlog/transcribe:latest" >> $GITHUB_OUTPUT
+
+      - name: Deploy Lambda function with container image
+        uses: aws-actions/aws-lambda-deploy@v1.1.0
         with:
-          function-name: pmLogTranscribe
-          code-artifacts-dir: ./dist/pmLogTranscribe
-          runtime: python3.14
-          handler: lambda_function.lambda_handler
+          function-name: my-container-function
+          package-type: Image  # Required: Indicates container deployment (not zip)
+          image-uri: ${{ steps.build-image.outputs.image }}  # ECR image URI from previous step
+          role: arn:aws:iam::184141950137:role/GitHubActionAWSLambdaRole  # IAM execution role for Lambda
+          # Note: handler, runtime, and layers should not be provided for container images
