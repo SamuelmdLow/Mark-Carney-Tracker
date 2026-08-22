@@ -21,16 +21,17 @@ def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
 
 
 def audio_urls_to_np(urls: list[str], sample_rate=16000):
-    audio = np.array([])
-    segment_durations = []
+    audio_nps = []
+
     for url in urls:
         audio_ffmpeg = audio_urls_to_ffmpeg([url], sample_rate=sample_rate)
         audio_np = np.frombuffer(audio_ffmpeg, np.int16).flatten().astype(
             np.float32) / 32768.0
+        audio_nps.append(audio_np)
         
-        segment_durations.append(len(audio_np)/sample_rate)
-        audio = np.concatenate((audio, audio_np))
-
+    segment_durations = list(map(lambda audio_np: len(audio_np)/sample_rate, audio_nps))
+    audio = np.concatenate(audio_nps)
+    
     return audio, segment_durations
 
 
