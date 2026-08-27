@@ -1,6 +1,5 @@
 import ffmpeg
 import numpy as np
-from resemblyzer import VoiceEncoder, preprocess_wav
 
 def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
     clip_audios = list(

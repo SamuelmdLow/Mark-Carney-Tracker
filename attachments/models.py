@@ -126,6 +126,8 @@ class Attachment(models.Model):
                     embedding=embedding,
                     voice_embedding=voice_embedding) for (segment, embedding, voice_embedding) in zip(segments, embeddings, voice_embeddings)])
 
+            self.diarize()
+
         self.save()
         return self
 
