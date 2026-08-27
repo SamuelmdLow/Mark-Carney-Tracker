@@ -19,7 +19,7 @@ COPY lambda_container/requirements.txt ${LAMBDA_TASK_ROOT}
 # Install the specified packages
 RUN pip install -r requirements.txt
 
-RUN python -c "import whisper; whisper.load_model('turbo', download_root='tmp/whisper')"
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('turbo', device='cpu', compute_type='int8')"
 
 # Copy function code
 COPY lambda_container/ ${LAMBDA_TASK_ROOT}

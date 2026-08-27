@@ -98,7 +98,7 @@ class M3U8():
 
 
 def transcribe_segment(audio_urls: list[str], initial_prompt):
-    '''
+    
     if settings.AWS_ACCESS_KEY_ID:
         
         config = botocore.config.Config(
@@ -125,7 +125,7 @@ def transcribe_segment(audio_urls: list[str], initial_prompt):
 
         print(result)
         return result["transcript"], result["segment_durations"]
-    '''
+    
     audio, segment_durations = audio_urls_to_np(audio_urls)
     transcription_model = apps.get_app_config(
         'attachments').transcription_model
@@ -281,38 +281,6 @@ def voice_embed_segments(audio, segments, sample_rate=16000):
     embeds = list(map(lambda wav: encoder.embed_utterance(preprocess_wav(wav)), wavs))
 
     return embeds
-
-
-def populate_attachment_data(attachment) -> Attachment:
-
-    data = attachment.json
-
-    if "video_m3u8" in data:
-        from attachments.models import AttachmentContent
-
-        segments = attachment.transcribe()
-
-        model = apps.get_app_config('semantic_index').model
-        embeddings = model.encode([s['text'] for s in segments]).tolist()
-
-        m3u8_base_url = attachment.json['video_m3u8']
-        m3u8 = M3U8()
-        m3u8.load(m3u8_base_url)
-        audio, _ = audio_urls_to_np(m3u8.get_audio_urls())
-
-        voice_embeddings = voice_embed_segments(audio, segments)
-
-        AttachmentContent.objects.filter(attachment=attachment).delete()
-        AttachmentContent.objects.bulk_create(
-            [AttachmentContent(
-                attachment=attachment,
-                ordering=segment['start'],
-                data=segment,
-                embedding=embedding,
-                voice_embedding=voice_embedding) for (segment, embedding, voice_embedding) in zip(segments, embeddings, voice_embeddings)])
-
-    attachment.save()
-    return attachment
 
 
 def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
