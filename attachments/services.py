@@ -1,30 +1,32 @@
-from importlib.resources import contents
-
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
+from django.conf import settings
 from pgvector.django import CosineDistance
-from torchgen import model
 
 from semantic_index.models import SemanticIndex
 from schedule_items.models import ScheduleItem
 from attachments.models import Attachment
 
-from bs4 import BeautifulSoup
+from audio.shared.services import transcribe_audio, audio_urls_to_np
+
 import aiohttp
 import asyncio
 from asgiref.sync import async_to_sync, sync_to_async
 import datetime
 import copy
-import re
 import itertools
+import re
+import json
 
-import ffmpeg
+from bs4 import BeautifulSoup
 import numpy as np
-
+import boto3
+import botocore
+from resemblyzer import VoiceEncoder, preprocess_wav
 
 class M3U8():
 
-    async def aload(self, m3u8_url_base: str) -> M3U8:
+    async def aload(self, m3u8_url_base: str):
         '''
         Sets up a M3U8 object from a m3u8_url
         '''
@@ -56,7 +58,7 @@ class M3U8():
 
                 return self
 
-    def load(self, m3u8_url_base: str) -> M3U8:
+    def load(self, m3u8_url_base: str):
         return async_to_sync(self.aload)(m3u8_url_base)
 
     async def aget_audio_urls(self, name=None) -> list[str]:
@@ -88,6 +90,49 @@ class M3U8():
 
     def get_audio_urls(self, name=None):
         return async_to_sync(self.aget_audio_urls)(name=name)
+
+    def transcribe(self, initial_prompt=None, group_size=200):
+        audio_urls = self.get_audio_urls()
+
+        return audio_urls_to_transcription(audio_urls, initial_prompt=initial_prompt, group_size=group_size)
+
+
+def transcribe_segment(audio_urls: list[str], initial_prompt):
+    '''
+    if settings.AWS_ACCESS_KEY_ID:
+        
+        config = botocore.config.Config(
+            read_timeout=900,
+            connect_timeout=900,
+            retries={"max_attempts": 0}
+        )
+
+        client = boto3.client('lambda', region_name=settings.AWS_REGION, config=config)
+        payload = {
+            "audio_urls": audio_urls,
+            "initial_prompt": initial_prompt,
+        }
+
+        response = client.invoke(
+            FunctionName='pmLogTranscribeContainerFunction',
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload),
+            Qualifier='$LATEST',
+        )
+
+        result = json.loads(
+            response['Payload'].read())
+
+        print(result)
+        return result["transcript"], result["segment_durations"]
+    '''
+    audio, segment_durations = audio_urls_to_np(audio_urls)
+    transcription_model = apps.get_app_config(
+        'attachments').transcription_model
+    transcript = transcribe_audio(
+        transcription_model, audio, initial_prompt=initial_prompt)
+
+    return transcript, segment_durations
 
 
 def resegment_body_to_sentences(segments: list[dict]):
@@ -140,7 +185,7 @@ def resegment_transcript_to_sentences(segments: list[dict]):
     return resegmented
 
 
-def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=40, overlap=5, sample_rate=16000) -> list[dict]:
+def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=200, overlap=5) -> list[dict]:
     '''
     Creates overlapping audio segments, transcribes them, and then merges the transcripts together, skipping overlapping segments. Returns a list of transcript segments.
     '''
@@ -177,19 +222,22 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
 
     transcript = []
     overlap_skip = 0
-    total_duration = 0
+    adjustment = 0
     moment = "start"
-    for group in grouped_urls:
-        audio = audio_urls_to_ffmpeg(group, sample_rate=sample_rate)
 
+    for group in grouped_urls:
+
+        if initial_prompt == None:
+            initial_prompt = ""
         initial_prompt = initial_prompt + " " + \
             " ".join([segment["text"] for segment in transcript])
 
         print(f"{overlap_skip}")
-        transcription = skip_overlap_in_transcript(
-            transcribe_audio(audio, initial_prompt=initial_prompt), overlap_skip=overlap_skip, moment=moment)
 
-        adjustment = total_duration - overlap_skip
+        transcription_segment, segment_durations = transcribe_segment(group, initial_prompt)
+
+        transcription = skip_overlap_in_transcript(
+            transcription_segment, overlap_skip=overlap_skip, moment=moment)
 
         if len(transcription) > 0:
             end_gap = transcription[-1]["end"] - \
@@ -197,116 +245,42 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
             start_gap = transcription[-1]["start"] - \
                 (SEGMENT_DURATION * (group_size-overlap))
 
-            moment = "end"
             if end_gap > 0 and start_gap > 0:
                 moment = "start"
-                transcription = transcription[:-1]
+                overlap_skip = transcription[-1][moment] - \
+                    (SEGMENT_DURATION * (group_size-overlap))
 
-            duration = transcription[-1][moment] - overlap_skip
-            overlap_skip = transcription[-1][moment] - \
-                (SEGMENT_DURATION * (group_size-overlap))
+                transcription = transcription[:-1]
+            else:
+                moment = "end"
+                overlap_skip = transcription[-1][moment] - \
+                    (SEGMENT_DURATION * (group_size-overlap))
+
             print(
-                f"duration {duration} seconds, overlap_skip {overlap_skip} seconds")
+                f"overlap_skip {overlap_skip} seconds")
         else:
             overlap_skip = 0
             moment = "start"
-            duration = SEGMENT_DURATION * (group_size-overlap)
             print(
-                f"Empty transcription for group, skipping {duration} seconds")
+                f"Empty transcription for group, skipping")
 
         transcription = adjust_transcription_timestamps(
             transcription, adjustment=adjustment)
         print(f"{"\n".join([segment["text"] for segment in transcription])}")
-        transcript += transcription
 
-        total_duration += duration
+        transcript += transcription
+        adjustment += sum(segment_durations[:group_size-overlap])
 
     return resegment_transcript_to_sentences(transcript)
 
 
-def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
-    clip_audios = list(
-        map(lambda url: ffmpeg.input(url), urls))
+def voice_embed_segments(audio, segments, sample_rate=16000):
+    encoder = VoiceEncoder()
+    
+    wavs = [audio[round(segment['start']*sample_rate):round(segment["end"]*sample_rate)] for segment in segments]
+    embeds = list(map(lambda wav: encoder.embed_utterance(preprocess_wav(wav)), wavs))
 
-    try:
-        out, _ = (
-            ffmpeg
-            .concat(*clip_audios, v=0, a=1)
-            .output('pipe:', format='s16le', acodec='pcm_s16le', ac=1, ar=str(sample_rate))
-            .run(capture_stdout=True, capture_stderr=True)
-        )
-        return out
-    except ffmpeg.Error as e:
-        print('stdout:', e.stdout.decode('utf8'))
-        print('stderr:', e.stderr.decode('utf8'))
-        raise e
-
-
-def transcribe_audio(audio, initial_prompt="") -> list[dict]:
-
-    reference_prompt = '''
-    This is a Canadian federal government media event. Use Candian spelling and correct government terminology. There will likely be both English and French.
-
-    The federal parties are:
-     - Liberal Party of Canada, Mark Carney
-     - Conservative Party of Canada (CPC), Pierre Poilievre
-     - New Democratic Party (NDP), Avi Lewis
-     - Bloc Québécois, Yves-François Blanchet
-     - Green Party of Canada, Elizabeth May
-
-    The provinces and territories of Canada are: 
-     - Alberta, Premier: Danielle Smith, 
-        - Edmonton, Calgary, Red Deer, Lethbridge, Medicine Hat, Grande Prairie, Fort McMurray, Sherwood Park
-     - British Columbia, Premier: David Eby,
-        - Vancouver, Victoria, Surrey, Burnaby, Kelowna, Kamloops, Nanaimo, Abbotsford
-     - Manitoba, Premier: Wab Kinew,
-        - Winnipeg, Brandon, Steinbach, Thompson, Portage la Prairie, Selkirk
-     - New Brunswick, Premier: Susan Holt,
-        - Fredericton, Moncton, Saint John, Bathurst, Miramichi, Edmundston
-     - Newfoundland and Labrador, Premier: 	Tony Wakeham,
-        - St. John's, Corner Brook, Gander, Grand Falls-Windsor, Happy Valley-Goose Bay
-     - Northwest Territories, Premier: Rocky "R.J." Simpson,
-        - Yellowknife, Hay River, Inuvik, Fort Smith, Behchokǫ̀
-     - Nova Scotia, Premier: Tim Houston,
-        - Halifax, Sydney, Dartmouth, Truro, New Glasgow
-     - Nunavut, Premier: John Main
-        - Iqaluit, Rankin Inlet, Arviat, Baker Lake, Cambridge Bay
-     - Ontario, Premier: Doug Ford,
-        - Toronto, Ottawa, Mississauga, Brampton, Hamilton, London, Markham, Vaughan, Kitchener, Windsor
-     - Prince Edward Island, Premier: Rob Lantz
-        - Charlottetown, Summerside, Stratford, Cornwall, Montague
-     - Québec, Premier: Christine Fréchette
-        - Montréal, Québec City, Laval, Gatineau, Longueuil, Sherbrooke, Saguenay
-     - Saskatchewan, Premier: Scott Moe
-        - Saskatoon, Regina, Prince Albert, Moose Jaw, Swift Current
-     - Yukon, Premier: Currie Dixon
-        - Whitehorse, Dawson City, Watson Lake, Haines Junction, Carmacks
-    '''
-
-    initial_prompt = reference_prompt + " " + initial_prompt
-
-    audio_np = np.frombuffer(
-        audio, np.int16).flatten().astype(np.float32) / 32768.0
-    model = apps.get_app_config('attachments').transcription_model
-    result = model.transcribe(
-        audio_np, word_timestamps=True, initial_prompt=initial_prompt)
-
-    def reduce_words(word: dict):
-        return {
-            "word": word["word"],
-            "start": word["start"],
-            "end": word["end"],
-        }
-
-    def reduce_segment(segment: dict):
-        return {
-            "start": segment["start"],
-            "end": segment["end"],
-            "text": segment["text"],
-            "words": list(map(reduce_words, segment["words"]))
-        }
-
-    return list(map(reduce_segment, result["segments"]))
+    return embeds
 
 
 def populate_attachment_data(attachment) -> Attachment:
@@ -315,17 +289,18 @@ def populate_attachment_data(attachment) -> Attachment:
 
     if "video_m3u8" in data:
         from attachments.models import AttachmentContent
-        m3u8_base_url = data['video_m3u8']
 
-        m3u8 = M3U8()
-        m3u8.load(m3u8_base_url)
-        audio_urls = m3u8.get_audio_urls()
-
-        segments = audio_urls_to_transcription(
-            audio_urls, initial_prompt=attachment.content)
+        segments = attachment.transcribe()
 
         model = apps.get_app_config('semantic_index').model
         embeddings = model.encode([s['text'] for s in segments]).tolist()
+
+        m3u8_base_url = attachment.json['video_m3u8']
+        m3u8 = M3U8()
+        m3u8.load(m3u8_base_url)
+        audio, _ = audio_urls_to_np(m3u8.get_audio_urls())
+
+        voice_embeddings = voice_embed_segments(audio, segments)
 
         AttachmentContent.objects.filter(attachment=attachment).delete()
         AttachmentContent.objects.bulk_create(
@@ -333,7 +308,8 @@ def populate_attachment_data(attachment) -> Attachment:
                 attachment=attachment,
                 ordering=segment['start'],
                 data=segment,
-                embedding=embedding) for (segment, embedding) in zip(segments, embeddings)])
+                embedding=embedding,
+                voice_embedding=voice_embedding) for (segment, embedding, voice_embedding) in zip(segments, embeddings, voice_embeddings)])
 
     attachment.save()
     return attachment
@@ -393,19 +369,20 @@ def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
                     if "words" in segment:
                         mid = len(segment["words"]) // 2
                         return split_when_required({"text": " ".join([word["word"] for word in segment["words"][:mid]]),
-                                    "words": segment["words"][:mid],
-                                    "start": segment["words"][0]["start"],
-                                    "end": segment["words"][mid-1]["end"],
-                                    }) + \
-                                split_when_required({"text": " ".join([word["word"] for word in segment["words"][mid:]]), 
-                                    "words": segment["words"][mid:],
-                                    "start": segment["words"][mid]["start"],
-                                    "end": segment["words"][-1]["end"]})
+                                                    "words": segment["words"][:mid],
+                                                    "start": segment["words"][0]["start"],
+                                                    "end": segment["words"][mid-1]["end"],
+                                                    }) + \
+                            split_when_required({"text": " ".join([word["word"] for word in segment["words"][mid:]]),
+                                                 "words": segment["words"][mid:],
+                                                 "start": segment["words"][mid]["start"],
+                                                 "end": segment["words"][-1]["end"]})
                     else:
                         words = segment["text"].split(" ")
                         mid = len(words) // 2
                         return split_when_required({"text": " ".join(words[:mid])}) + \
-                                split_when_required({"text": " ".join(words[mid:])})
+                            split_when_required(
+                                {"text": " ".join(words[mid:])})
                 return [segment]
 
             resegmented = []
@@ -481,7 +458,7 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                     # so we tend to use lastdatemodified time instead, unless a large departure.
                     attachment_datetime = livedatetime
 
-                contents = title.split(":") +[description]
+                contents = title.split(":") + [description]
                 threshold = 0.6
                 if "carney" not in "".join(contents).lower():
                     threshold = 0.5
@@ -655,7 +632,8 @@ async def cpac_create_attachments_from_urls(urls: list[str]) -> list[Attachment]
 
     attachments = list(filter(lambda a: a is not None, attachments))
 
-    print(f"Creating {len(attachments)} attachments... {"\n     - ".join([a.source for a in attachments])}")
+    print(
+        f"Creating {len(attachments)} attachments... {"\n     - ".join([a.source for a in attachments])}")
     return await sync_to_async(Attachment.objects.bulk_create_and_index)(attachments)
 
 

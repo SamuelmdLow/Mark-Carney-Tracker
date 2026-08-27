@@ -8,6 +8,8 @@ from pgvector.django import VectorField, CosineDistance
 
 from semantic_index.models import SemanticIndex
 
+import numpy as np
+
 
 # Create your models here.
 
@@ -87,7 +89,53 @@ class Attachment(models.Model):
                     .annotate(score=1-CosineDistance('embedding', query_embedding)) \
                     .order_by("ordering") \
                     .values("data", "score"))
-        
+
+    def transcribe(self, group_size=200):
+        from attachments.services import M3U8
+
+        print(f"group size: {group_size}")
+
+        description = None
+        if "description" in self.json:
+            description = self.json["description"]
+
+        if "video_m3u8" in self.json:
+            m3u8_base_url = self.json['video_m3u8']
+
+            m3u8 = M3U8()
+            m3u8.load(m3u8_base_url)
+
+            return m3u8.transcribe(initial_prompt=description, group_size=group_size)
+
+        return None
+
+    def diarize(self, group_voices=True):
+        from people.models import Voice
+        from people.services import kmeans, group_voices_into_speakers_by_proximity
+
+        KMEANS_THRESHOLD = 0.25
+        JOIN_TO_SPEAKER_THRESHOLD = 0.1
+
+        Voice.objects.filter(attachment=self).delete()
+        lines = list(self.contents.exclude(voice_embedding=None))
+        if len(lines) > 0:
+            voice_embeddings = np.array(
+                [line.voice_embedding for line in lines])
+
+            best_fit = kmeans(voice_embeddings, threshold=KMEANS_THRESHOLD)
+
+            new_voices = Voice.objects.bulk_create([Voice(voice_embedding=voice_embedding, attachment=self) for voice_embedding in best_fit])
+
+            if group_voices:
+                group_voices_into_speakers_by_proximity(merge_threshold=JOIN_TO_SPEAKER_THRESHOLD)
+
+            sims = voice_embeddings @ best_fit.T 
+            labels = sims.argmax(axis=1)
+            for line, label in zip(lines, labels):
+                line.voice = new_voices[label]
+                line.attribution = new_voices[label].person
+            AttachmentContent.objects.bulk_update(lines, ["voice"])
+
     class Meta:
         ordering = ["-published_at"]
 
@@ -95,6 +143,10 @@ class AttachmentContent(models.Model):
     data = models.JSONField()
     ordering = models.FloatField()
     embedding = VectorField(dimensions=384)
+
+    voice_embedding = VectorField(dimensions=256, null=True, default=None)
+    voice = models.ForeignKey(to="people.voice", related_name="contents", null=True, blank=True, default=None, on_delete=models.SET_NULL)
+    attribution = models.ForeignKey(to="people.person", null=True, blank=True, default=None, on_delete=models.SET_NULL)
 
     attachment = models.ForeignKey(Attachment, on_delete=models.CASCADE, related_name='contents')
 

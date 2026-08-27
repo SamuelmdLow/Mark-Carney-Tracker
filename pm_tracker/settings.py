@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'schedule_items',
     'attachments',
     'semantic_index',
+    'people',
 
     'rest_framework',
     'generic_relations',
@@ -165,3 +166,8 @@ WHISPER_MODEL = env('WHISPER_MODEL', default="base")
 
 # Celery configuration
 CELERY_BROKER_URL = 'redis://redis:6379/0'
+
+# AWS configuration
+AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID', default=None)
+AWS_SECRET_ACCESS_KEY = env('AWS_SECRET_ACCESS_KEY', default=None)
+AWS_REGION = env('AWS_REGION', default=None)

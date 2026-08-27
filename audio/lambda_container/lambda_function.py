@@ -1,7 +1,7 @@
-import whisper
+from faster_whisper import WhisperModel
 from shared.services import transcribe_audio, audio_urls_to_np
 
-model = whisper.load_model('turbo', download_root="tmp/whisper")
+model = WhisperModel("turbo", device="cpu", compute_type="int8")
 
 def handler(event, context):
     audio_urls = event['audio_urls']
