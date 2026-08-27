@@ -1,5 +1,7 @@
 FROM public.ecr.aws/lambda/python:3.12
 
+ENV WHISPER_MODEL=large-v3-turbo
+
 RUN dnf install -y tar xz wget
 RUN mkdir -p ffmpeg && \
     cd ffmpeg && \
@@ -19,7 +21,7 @@ COPY lambda_container/requirements.txt ${LAMBDA_TASK_ROOT}
 # Install the specified packages
 RUN pip install -r requirements.txt
 
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('turbo', device='cpu', compute_type='int8', download_root='tmp/whisper')"
+RUN python -c "from faster_whisper import WhisperModel; import os; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root='tmp/whisper')"
 
 # Copy function code
 COPY lambda_container/ ${LAMBDA_TASK_ROOT}
