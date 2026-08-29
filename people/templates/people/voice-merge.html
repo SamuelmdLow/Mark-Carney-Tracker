@@ -1,0 +1,50 @@
+<html>
+    {% for group in groups %}
+        <div class="group">
+        {% for voice in group %}
+            <details>
+                <summary>
+                    <h3>{{voice.similarity}} 
+                        <a href="/admin/people/voice/{{voice.voice.id}}/change/">Voice {{voice.voice.id}}</a>
+                        {% if voice.voice.person_confirmed and voice.voice.person %} (<a href="/admin/people/person/{{voice.voice.person.id}}/change/">{{voice.voice.person.name}}</a>){%endif%} 
+                        - <a href="{{voice.attachment.source}}">{{voice.voice.attachment.title}}</a></h3>
+                </summary>
+                {% for content in voice.voice.attachment.contents.all %}
+                    {% if content.voice == voice.voice %}
+                        <p class="highlight">{{content.data.text}}</p>
+                    {% else %}
+                        <p>{{content.data.text}}</p>
+                    {% endif %}
+                {% endfor %}
+            </details>
+        {% endfor %}
+        </div>
+    {% endfor %}
+
+    <style>
+        div.group {
+            margin: 1em auto;
+            border: 1px solid black;
+            padding: 1em;
+            max-width: 800px;
+        }
+        p {
+            font-family: monospace;
+            width: fit-content;
+        }
+        p.highlight {
+            margin-left: 2em;
+            background: #ff000033;
+        }
+        details {
+            margin-bottom: 1em;
+        }
+        summary h3 {
+            display: contents;
+        }
+        summary {
+            position: relative;
+        }
+        
+    </style>
+</html>

@@ -27,6 +27,8 @@ from schedule_items.views import LocationViewSet, ScheduleItemsViewSet
 from attachments.views import AttachmentViewSet, AttachmentContentViewSet
 from semantic_index.views import SemanticIndexViewSet
 
+from people.views import voice_merges
+
 router = routers.DefaultRouter()
 router.register(r"locations", LocationViewSet)
 router.register(r"schedule_items", ScheduleItemsViewSet)
@@ -40,4 +42,6 @@ urlpatterns = [
     path("api-auth/", include("rest_framework.urls")),
 
     path("graphql", csrf_exempt(GraphQLView.as_view(graphiql=True))),
+
+    path("voice-merges", voice_merges),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

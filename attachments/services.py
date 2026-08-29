@@ -197,14 +197,13 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
     def skip_overlap_in_transcript(transcription: list[dict], overlap_skip: int, moment: str) -> list[dict]:
         if overlap_skip < 0:
             return transcription
-        gap = None
+        previous_gap = None
         for i in range(len(transcription)):
             newGap = abs(overlap_skip - transcription[i][moment])
-            print(f"{overlap_skip} {newGap} {gap}")
-            if gap:
-                if newGap > gap:
-                    return transcription[i-1:]
-            gap = newGap
+            print(f"{overlap_skip} {newGap} {previous_gap}")
+            if previous_gap!=None and newGap > previous_gap:
+                return transcription[i-1:]
+            previous_gap = newGap
         return []
 
     def adjust_transcription_timestamps(transcription: list[dict], adjustment: int) -> list[dict]:
@@ -276,8 +275,18 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
 
 def voice_embed_segments(audio, segments, sample_rate=16000):
     encoder = VoiceEncoder()
+
+    def generate_slice(segment):
+        MIN_DURATION = 1/16
+
+        mid = (segment['start'] + segment['end'])/2
+        duration = max(segment['end'] - segment['start'], MIN_DURATION)
+
+        start = int((mid - duration/2) * sample_rate)
+        end = int((mid + duration/2) * sample_rate)
+        return slice(start,end)
     
-    wavs = [audio[round(segment['start']*sample_rate):round(segment["end"]*sample_rate)] for segment in segments]
+    wavs = [audio[generate_slice(segment)] for segment in segments]
     embeds = list(map(lambda wav: encoder.embed_utterance(preprocess_wav(wav)), wavs))
 
     return embeds

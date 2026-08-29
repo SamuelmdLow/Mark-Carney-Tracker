@@ -11,6 +11,4 @@ class Command(BaseCommand):
     @async_to_sync
     async def handle(self, *args, **options):
         attachments = await sync_to_async(list)(Attachment.objects.all())
-        await asyncio.gather(*[sync_to_async(attachment.diarize, thread_sensitive=False)(group_voices=False) for attachment in attachments])
-
-        await sync_to_async(group_voices_into_speakers_by_proximity)()
+        await asyncio.gather(*[sync_to_async(attachment.diarize, thread_sensitive=False)() for attachment in attachments])

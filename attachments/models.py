@@ -150,12 +150,12 @@ class Attachment(models.Model):
 
         return None
 
-    def diarize(self, group_voices=True):
+    def diarize(self):
         from people.models import Voice
-        from people.services import kmeans, group_voices_into_speakers_by_proximity
+        from people.services import kmeans, kmeans_elbow
 
-        KMEANS_THRESHOLD = 0.25
-        JOIN_TO_SPEAKER_THRESHOLD = 0.1
+        ELBOW_THRESHOLD = 0.9
+        DISTANCE_THRESHOLD = 0.2
 
         Voice.objects.filter(attachment=self).delete()
         lines = list(self.contents.exclude(voice_embedding=None))
@@ -163,21 +163,44 @@ class Attachment(models.Model):
             voice_embeddings = np.array(
                 [line.voice_embedding for line in lines])
 
-            best_fit = kmeans(voice_embeddings, threshold=KMEANS_THRESHOLD)
+            best_fit = kmeans_elbow(
+                voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
+            print(f" {len(best_fit)} {self.title}")
 
             new_voices = Voice.objects.bulk_create([Voice(
                 voice_embedding=voice_embedding, attachment=self) for voice_embedding in best_fit])
-
-            if group_voices:
-                group_voices_into_speakers_by_proximity(
-                    merge_threshold=JOIN_TO_SPEAKER_THRESHOLD)
 
             sims = voice_embeddings @ best_fit.T
             labels = sims.argmax(axis=1)
             for line, label in zip(lines, labels):
                 line.voice = new_voices[label]
                 line.attribution = new_voices[label].person
-            AttachmentContent.objects.bulk_update(lines, ["voice"])
+
+            AttachmentContent.objects.bulk_update(
+                lines, ["voice", "attribution"])
+
+    def regenerate_voice_embeddings(self):
+        from attachments.services import M3U8, audio_urls_to_np, voice_embed_segments
+
+        if "video_m3u8" in self.json:
+            contents = list(self.contents.exclude(
+                voice_embedding=None).order_by("ordering"))
+            if len(contents) > 0:
+                segments = [content.data for content in contents]
+                m3u8_base_url = self.json['video_m3u8']
+                m3u8 = M3U8()
+                m3u8.load(m3u8_base_url)
+                audio, _ = audio_urls_to_np(m3u8.get_audio_urls())
+
+                voice_embeddings = voice_embed_segments(audio, segments)
+
+                for voice_embedding, content in zip(voice_embeddings, contents):
+                    content.voice_embedding = voice_embedding
+
+                AttachmentContent.objects.bulk_update(
+                    contents, ["voice_embedding"])
+
+                self.diarize()
 
     class Meta:
         ordering = ["-published_at"]
@@ -192,10 +215,10 @@ class AttachmentContent(models.Model):
     voice = models.ForeignKey(to="people.voice", related_name="contents",
                               null=True, blank=True, default=None, on_delete=models.SET_NULL)
     attribution = models.ForeignKey(
-        to="people.person", null=True, blank=True, default=None, on_delete=models.SET_NULL)
+        to="people.person", related_name='contents', null=True, blank=True, default=None, on_delete=models.SET_NULL)
 
     attachment = models.ForeignKey(
-        Attachment, on_delete=models.CASCADE, related_name='contents')
+        Attachment, related_name='contents', on_delete=models.CASCADE)
 
     class Meta:
-        ordering = ['-id', 'ordering']
+        ordering = ['attachment', 'ordering']

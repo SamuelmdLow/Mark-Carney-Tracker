@@ -38,12 +38,25 @@ def disjoint_sets(sets):
     return groups
 
 
-def visualize_voices():
-
+def visualize_content():
     points = AttachmentContent.objects.exclude(
         voice_embedding=None).order_by("ordering")
+    v = np.array([point.voice_embedding for point in points])
+    X = v @ v.T
 
-    X = [content.voice_embedding for content in points]
+    voices = []
+    c = []
+    for point in points:
+        if not point.voice in voices:
+            voices.append(point.voice)
+        c.append(voices.index(point.voice))
+
+    visualize_embeddings(X, c, len(voices))
+
+def visualize_voices():
+    points = Voice.objects.all()
+    v = np.array([point.voice_embedding for point in points])
+    X = v @ v.T
 
     attachments = []
     c = []
@@ -52,12 +65,12 @@ def visualize_voices():
             attachments.append(point.attachment)
         c.append(attachments.index(point.attachment))
 
-    np.set_printoptions(precision=3, suppress=True)
-    v = np.array(X)
+    visualize_embeddings(X, c, len(attachments))
 
-    print(v @ v.T)
-
+def visualize_embeddings(X, c, colour_num):
     mds = MDS(n_components=2, random_state=0)
+
+    print(X.shape)
 
     # Fit the data to the MDS
     # object and transform the data
@@ -66,9 +79,15 @@ def visualize_voices():
     y = X_reduced[:, 1]
 
     fig, ax = plt.subplots()
-    ax.scatter(x, y, c=c, cmap=plt.get_cmap("jet", len(attachments)))
+    ax.scatter(x, y, linewidths=0.25, alpha=0.5, c=c, cmap=plt.get_cmap("jet", colour_num))
 
     plt.show()
+
+
+def label_embeddings(centers, embeddings):
+    sim_matrix = np.array(centers) @ embeddings.T
+    labels = sim_matrix.argmax(axis=0, keepdims=True).flatten()
+    return labels
 
 
 def voices_by_kmeans(threshold=0.2, merge_threshold=0.15):
@@ -106,6 +125,7 @@ def voices_by_kmeans_by_attachment(kmeans_threshold=0.2, merge_threshold=0.1):
 
 
 async def kmeans_random_fit(voice_embeddings, k, max_iterations=100):
+    voice_embeddings = np.array([v for v in voice_embeddings if np.linalg.norm(v) > 0])
     cluster = [voice_embeddings[random.randint(0, len(voice_embeddings)-1)]]
     for _ in range(k-1):
 
@@ -166,18 +186,20 @@ async def kmeans_fit(voice_embeddings, k, restarts=100, max_iterations=100):
 async def kmeans_match_theshold(voice_embeddings, threshold=0.3, restarts=10, max_iterations=100):
     np.set_printoptions(precision=3, suppress=True, linewidth=sys.maxsize)
 
-    lower = 2
+    best_fit = None
+    lower = 1
     upper = None
     k = lower
 
     while True:
-        best_fit, min_avg_distance, max_dist = await kmeans_fit(voice_embeddings, k, restarts=restarts, max_iterations=max_iterations)
-
-        # print(f"    {k} {max_dist} {min_avg_distance} {lower} {upper}")
-
-        if upper and upper - lower <= 1:
+        if upper and k >=upper:
             break
-        elif max_dist < threshold:
+        fit, min_avg_distance, max_dist = await kmeans_fit(voice_embeddings, k, restarts=restarts, max_iterations=max_iterations)
+
+        print(f"    {k} {max_dist} {min_avg_distance} {lower} {upper}")
+
+        if max_dist < threshold:
+            best_fit = fit
             upper = k
         else:
             lower = k
@@ -190,7 +212,7 @@ async def kmeans_match_theshold(voice_embeddings, threshold=0.3, restarts=10, ma
     return best_fit
 
 
-def kmeans_elbow(voice_embeddings, elbow_log_threshold=5, restarts=100, max_iterations=100):
+async def async_kmeans_elbow(voice_embeddings, elbow_threshold=0.8, distance_threshold=0.1, restarts=100, max_iterations=100):
     k = 1
 
     rate = None
@@ -199,27 +221,23 @@ def kmeans_elbow(voice_embeddings, elbow_log_threshold=5, restarts=100, max_iter
 
     while True:
 
-        best_fit, avg_square_distance, max_dist = async_to_sync(kmeans_fit)(
+        best_fit, avg_square_distance, max_dist = await kmeans_fit(
             voice_embeddings, k, restarts=restarts, max_iterations=max_iterations)
 
-        if prev_avg_square_distance:
+        if prev_avg_square_distance and prev_max_dist:
             rate = avg_square_distance/prev_avg_square_distance
 
-        print(f"{k} {avg_square_distance} {max_dist} {rate}")
-
-        if prev_rate:
-            rate_dif = rate-prev_rate
-            print(rate_dif)
-            if rate_dif <= 0 or np.log10(rate_dif) < -elbow_log_threshold:
-                return prev_fit, k-1
-
-        if prev_avg_square_distance:
-            prev_rate = rate
+            if rate > elbow_threshold or prev_max_dist <= distance_threshold:
+                print(f"{k-1} {prev_max_dist}")   
+                return prev_fit
 
         k = k + 1
         prev_fit = best_fit
+        prev_max_dist = max_dist
         prev_avg_square_distance = avg_square_distance
 
+def kmeans_elbow(voice_embeddings, elbow_threshold=0.8, distance_threshold=0.1, restarts=100, max_iterations=100):
+    return async_to_sync(async_kmeans_elbow)(voice_embeddings, elbow_threshold=elbow_threshold, distance_threshold=distance_threshold, restarts=restarts, max_iterations=max_iterations)
 
 async def multiple_kmeans(voice_embeddings, thresholds=[0.3], upper=None, lower=1, restarts=100, max_iterations=100):
     np.set_printoptions(precision=3, suppress=True, linewidth=sys.maxsize)
@@ -406,15 +424,10 @@ def group_voices_into_speakers(voice_id_groups):
     Person.objects.filter(name="?").exclude(id__in=used_speakers).delete()
 
 
-def voices_by_proximate(merge_threshold=0.15):
-    np.set_printoptions(precision=3, suppress=True, linewidth=sys.maxsize)
-
-    lines = AttachmentContent.objects.exclude(voice_embedding=None)
-    voice_embeddings = np.array([line.voice_embedding for line in lines])
-
+def voices_by_proximate(voice_embeddings, merge_threshold=0.1):
     cluster_sim = voice_embeddings @ voice_embeddings.T
     groups = np.where(cluster_sim > 1-merge_threshold,
-                      np.arange(len(lines)), None)
+                      np.arange(len(voice_embeddings)), None)
     groups = [[v for v in group if v != None] for group in groups]
     groups = disjoint_sets(groups)
 
@@ -427,10 +440,27 @@ def voices_by_proximate(merge_threshold=0.15):
 
     centers = np.array(centers)
 
-    print(centers.shape)
-    print(centers)
+    return groups, centers
 
-    update_voices(centers)
+
+def voices_by_dbscan(voice_embeddings, merge_threshold=0.1):
+    dbscan = DBSCAN(eps=merge_threshold, min_samples=1, metric="cosine")
+    labels = dbscan.fit_predict(voice_embeddings)
+
+    groups = [[] for _ in range(max(labels)+1)]
+    for i, l in enumerate(labels):
+        groups[l].append(i)
+
+    centers = []
+    for group in groups:
+        group_embeddings = np.array([voice_embeddings[i] for i in group])
+        center = group_embeddings.mean(axis=0)
+        center = center/np.linalg.norm(center)
+        centers.append(center)
+
+    centers = np.array(centers)
+
+    return groups, centers
 
 
 def log_diarize():
@@ -558,18 +588,26 @@ def log_all_transcripts(file_name="log"):
     f = open(f'{file_name}.txt', "w")
     for attachment in Attachment.objects.all():
 
+        speakers = []
         speaker = None
         contents = attachment.contents.exclude(voice=None).order_by("ordering")
 
         if contents.exists():
             f.write(f'\n{attachment.title} {attachment.source}\n')
 
+            prev_emb = None
+            first = True
             for content in contents:
                 current_speaker = f"{content.attribution.name} {content.attribution.id}" if content.attribution else f"Voice {content.voice.id}"
                 if speaker != current_speaker:
-                    f.write(f'  {current_speaker}\n')
+                    if not current_speaker in speakers:
+                        speakers.append(current_speaker)
+                    f.write(f'  Speaker {speakers.index(current_speaker)} ({current_speaker})\n')
                     speaker = current_speaker
-                f.write(f'      {content.ordering} {content.data['text']}\n')
+
+                f.write(f'      {content.ordering} {content.data['end']-content.data['start']} {content.voice.voice_embedding @ content.voice_embedding.T} {prev_emb @ content.voice_embedding.T if not first else ""}\n        {content.data['text']}\n')
+                prev_emb = content.voice_embedding
+                first = False
 
     f.close()
 
@@ -630,3 +668,35 @@ def dbscan_diarize(file_name="log_dbscan"):
 
     f.close()
     print(f"Wrote {file_name}")
+
+
+def match_voices(threshold=0.85):
+
+    identified_voices = list(Voice.objects.filter(person_confirmed=True))
+    unidentified_voices = list(Voice.objects.filter(person_confirmed=False))
+    all_voices = unidentified_voices + identified_voices
+
+    unidentified_voice_embeddings = np.array([voice.voice_embedding for voice in unidentified_voices])
+    all_voices_embeddings = np.array([voice.voice_embedding for voice in all_voices])
+
+    sim_matrix = unidentified_voice_embeddings @ all_voices_embeddings.T
+    self_distances = np.pad(np.diag(np.diag(sim_matrix)), ((0,0), (0,len(identified_voices))))
+    sim_matrix = sim_matrix - self_distances
+    max_sims = sim_matrix.max(axis=1, keepdims=True)
+    indexes = np.argsort(-max_sims, axis=0).flatten()
+
+    ordered_sims = sim_matrix[indexes]
+
+    ordered_unidentified_voices = [unidentified_voices[int(i)] for i in indexes]
+
+    match_voices = [{
+            "voice": voice,
+            "matches": [
+                {
+                    "voice": all_voices[i],
+                    "similarity": sims[i]
+                }
+                for i in np.argsort(-sims) if sims[i] > threshold]
+        } for sims, voice in zip(ordered_sims, ordered_unidentified_voices)]
+
+    return match_voices

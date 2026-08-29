@@ -11,8 +11,8 @@ class PersonAdmin(admin.ModelAdmin):
 
 class VoiceAdmin(admin.ModelAdmin):
     ordering = ["person__name", "id"]
-    list_display = ["id", "person"]
-    search_fields = ["id", "person__name"]
+    list_display = ["id", "person", "person_confirmed", "attachment"]
+    search_fields = ["id", "person__name", "attachment__title"]
 
 admin.site.register(Person, PersonAdmin)
 admin.site.register(Voice, VoiceAdmin)

@@ -6,6 +6,12 @@ from celery import shared_task
 
 
 @shared_task
+def generate_voice_embedding_task(attachment_pk: int):
+    attachment = Attachment.objects.get(pk=attachment_pk)
+    attachment.regenerate_voice_embeddings()
+    return attachment.contents.all()
+
+@shared_task
 def populate_attachment_data_task(attachment_pk: int):
     attachment = Attachment.objects.get(pk=attachment_pk)
     attachment.populate()

@@ -11,7 +11,7 @@ class AttachmentAdmin(admin.ModelAdmin):
 
 class AttachmentContentAdmin(admin.ModelAdmin):
     ordering = ["-attachment", "ordering"]
-    list_display = ["attachment", "ordering", "data"]
+    list_display = ["attachment", "ordering", "data", "voice", "attribution"]
     search_fields = ["attachment__id", "attachment__title", "data"]
 
 admin.site.register(Attachment, AttachmentAdmin)

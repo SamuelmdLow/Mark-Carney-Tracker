@@ -6,5 +6,6 @@ class Command(BaseCommand):
     help = "Closes the specified poll for voting"
 
     def handle(self, *args, **options):
-        attachment = Attachment.objects.filter(id=1583).first()
+        # 
+        attachment = Attachment.objects.filter(id=330).first()
         populate_attachment_data_task.delay(attachment.pk)
