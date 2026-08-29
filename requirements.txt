@@ -16,6 +16,7 @@ geopy==2.4.1
 graphene-django==3.2.3
 gunicorn==26.0.0
 lxml==6.1.1
+matplotlib==3.11.1
 numba==0.65.1
 numpy==2.4.6
 pgvector==0.4.2
