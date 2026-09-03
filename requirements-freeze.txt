@@ -55,6 +55,7 @@ hf-xet==1.5.2
 httpcore==1.0.9
 httpx==0.28.1
 huggingface_hub==1.26.0
+HyperPyYAML==1.2.3
 idna==3.18
 Jinja2==3.1.6
 jmespath==1.1.0
@@ -115,11 +116,14 @@ requests==2.34.2
 Resemblyzer==0.1.4
 rest-framework-generic-relations==2.2.0
 rich==15.0.0
+ruamel.yaml==0.18.17
+ruamel.yaml.clib==0.2.15
 s3transfer==0.19.2
 safetensors==0.8.0
 scikit-learn==1.9.0
 scipy==1.18.0
 sentence-transformers==5.5.1
+sentencepiece==0.2.2
 setuptools==81.0.0
 shellingham==1.5.4
 six==1.17.0
@@ -127,6 +131,7 @@ smmap==5.0.3
 soundfile==0.14.0
 soupsieve==2.9.1
 soxr==1.1.0
+speechbrain==1.1.1
 sqlparse==0.5.5
 sympy==1.14.0
 text-unidecode==1.3
@@ -135,6 +140,7 @@ tiktoken==0.13.0
 timezonefinder==8.2.4
 tokenizers==0.22.2
 torch==2.12.0
+torchaudio==2.11.0
 tqdm==4.70.0
 transformers==5.14.1
 triton==3.7.0

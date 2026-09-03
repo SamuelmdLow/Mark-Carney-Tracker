@@ -22,8 +22,6 @@ from bs4 import BeautifulSoup
 import numpy as np
 import boto3
 import botocore
-from speechbrain.inference.speaker import EncoderClassifier
-import torchaudio
 import torch
 
 
@@ -289,7 +287,7 @@ def voice_embed_segments(audio, segments, sample_rate=16000):
         return slice(start,end)
 
     wavs = [audio[generate_slice(segment)] for segment in segments]
-    classifier = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
+    classifier = apps.get_app_config('attachments').speaker_model
     
     embeds = [classifier.encode_batch(wav)[0][0][:] for wav in wavs]
     embeds = [unnormalized_embed/np.linalg.norm(unnormalized_embed) for unnormalized_embed in embeds]

@@ -24,8 +24,8 @@ psycopg2==2.9.12
 redis==6.4.0
 regex==2026.5.9
 requests==2.34.2
-Resemblyzer==0.1.4
 rest-framework-generic-relations==2.2.0
 sentence-transformers==5.5.1
+speechbrain==1.1.1
 timezonefinder==8.2.4
 torch==2.12.0
