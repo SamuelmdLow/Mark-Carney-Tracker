@@ -183,8 +183,7 @@ class Attachment(models.Model):
         from attachments.services import M3U8, audio_urls_to_np, voice_embed_segments
 
         if "video_m3u8" in self.json:
-            contents = list(self.contents.exclude(
-                voice_embedding=None).order_by("ordering"))
+            contents = list(self.contents.order_by("ordering"))
             if len(contents) > 0:
                 segments = [content.data for content in contents]
                 m3u8_base_url = self.json['video_m3u8']
@@ -193,7 +192,7 @@ class Attachment(models.Model):
                 audio, _ = audio_urls_to_np(m3u8.get_audio_urls())
 
                 voice_embeddings = voice_embed_segments(audio, segments)
-
+                
                 for voice_embedding, content in zip(voice_embeddings, contents):
                     content.voice_embedding = voice_embedding
 
@@ -211,7 +210,7 @@ class AttachmentContent(models.Model):
     ordering = models.FloatField()
     embedding = VectorField(dimensions=384)
 
-    voice_embedding = VectorField(dimensions=256, null=True, default=None)
+    voice_embedding = VectorField(dimensions=192, null=True, default=None)
     voice = models.ForeignKey(to="people.voice", related_name="contents",
                               null=True, blank=True, default=None, on_delete=models.SET_NULL)
     attribution = models.ForeignKey(

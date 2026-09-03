@@ -11,3 +11,4 @@ class Command(BaseCommand):
         attachments = list(Attachment.objects.all())
         for attachment in attachments:
             generate_voice_embedding_task.delay_on_commit(attachment.pk)
+            #attachment.regenerate_voice_embeddings()

@@ -27,7 +27,7 @@ from schedule_items.views import LocationViewSet, ScheduleItemsViewSet
 from attachments.views import AttachmentViewSet, AttachmentContentViewSet
 from semantic_index.views import SemanticIndexViewSet
 
-from people.views import voice_merges
+from people.views import voices_dashboard, voices_cluster
 
 router = routers.DefaultRouter()
 router.register(r"locations", LocationViewSet)
@@ -38,10 +38,11 @@ router.register(r"semantic_index", SemanticIndexViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path("", include(router.urls)),
+    path("api/", include(router.urls)),
     path("api-auth/", include("rest_framework.urls")),
 
     path("graphql", csrf_exempt(GraphQLView.as_view(graphiql=True))),
 
-    path("voice-merges", voice_merges),
+    path("dashboard/voices/", voices_dashboard),
+    path('dashboard/voices/<int:cluster>/', voices_cluster, name='voices_cluster'),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

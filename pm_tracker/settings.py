@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'semantic_index',
     'people',
 
+    'django_filters',
     'rest_framework',
     'generic_relations',
     "graphene_django"

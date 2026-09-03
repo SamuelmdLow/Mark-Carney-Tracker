@@ -22,7 +22,10 @@ from bs4 import BeautifulSoup
 import numpy as np
 import boto3
 import botocore
-from resemblyzer import VoiceEncoder, preprocess_wav
+from speechbrain.inference.speaker import EncoderClassifier
+import torchaudio
+import torch
+
 
 class M3U8():
 
@@ -274,8 +277,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
 
 
 def voice_embed_segments(audio, segments, sample_rate=16000):
-    encoder = VoiceEncoder()
-
+    audio = torch.tensor(audio)
     def generate_slice(segment):
         MIN_DURATION = 1/16
 
@@ -285,9 +287,12 @@ def voice_embed_segments(audio, segments, sample_rate=16000):
         start = int((mid - duration/2) * sample_rate)
         end = int((mid + duration/2) * sample_rate)
         return slice(start,end)
-    
+
     wavs = [audio[generate_slice(segment)] for segment in segments]
-    embeds = list(map(lambda wav: encoder.embed_utterance(preprocess_wav(wav)), wavs))
+    classifier = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
+    
+    embeds = [classifier.encode_batch(wav)[0][0][:] for wav in wavs]
+    embeds = [unnormalized_embed/np.linalg.norm(unnormalized_embed) for unnormalized_embed in embeds]
 
     return embeds
 

@@ -2,35 +2,56 @@ from django.http import Http404
 from django.shortcuts import render
 
 from people.models import Voice, Person
-from people.services import match_voices, kmeans_elbow, kmeans
+from people.services import match_voices, kmeans_elbow, kmeans, disjoint_sets
 
 import numpy as np
 import sys
 
-def voice_merges(request):
-    np.set_printoptions(precision=6, suppress=True,
-                        linewidth=sys.maxsize, threshold=sys.maxsize)
-    
+def voices_dashboard(request):
     voices = Voice.objects.all()
     voice_embeddings = np.array([voice.voice_embedding for voice in voices])
-    #centers = kmeans(voice_embeddings, threshold=0.2)
-    centers = kmeans_elbow(voice_embeddings, elbow_threshold=0.9, distance_threshold=0.2)
-    sim_matrix = voice_embeddings @ centers.T
-    labels = sim_matrix.argmax(axis=1, keepdims=True).flatten()
-    max_sim = sim_matrix.max(axis=1, keepdims=True)
 
-    chosen_dists = np.where(sim_matrix == max_sim, 1-sim_matrix, 0)
-    dist_sums = np.sum(chosen_dists, axis=0)
-    unique, counts = np.unique(labels, return_counts=True)
+    cluster_sim = voice_embeddings @ voice_embeddings.T
 
-    avgs = dist_sums/np.array(counts)
+    groups = np.where(cluster_sim > 0.65,
+                      np.arange(len(voice_embeddings)), None)
+    groups = [[v for v in group if v != None] for group in groups]
+    groups = disjoint_sets(groups)
 
-    groups = [[] for _ in avgs]
-    centers_index = np.argsort(avgs).flatten()
-    for v in np.argsort(-max_sim, axis=0).flatten():
-        groups[centers_index[labels[v]]].append({
-            "voice": voices[int(v)],
-            "similarity": max_sim[v]
-            })
+    groups = sorted(groups, key=lambda g:len(g), reverse=True)
+    
+    return render(request, "people/voice-dashboard.html", {"group_range": range(len(groups)), "cluster_count":len([g for g in groups if len(g) > 1])})
+    
 
-    return render(request, "people/voice-merge.html", {"groups": groups})
+def voices_cluster(request, cluster):
+    voices = Voice.objects.all()
+    voice_embeddings = np.array([voice.voice_embedding for voice in voices])
+
+    cluster_sim = voice_embeddings @ voice_embeddings.T
+
+    groups = np.where(cluster_sim > 0.65,
+                      np.arange(len(voice_embeddings)), None)
+    groups = [[v for v in group if v != None] for group in groups]
+    groups = disjoint_sets(groups)
+
+    groups = sorted(groups, key=lambda g:len(g), reverse=True)
+
+    try:
+        cluster = int(cluster)
+    except:
+        cluster = 0
+    if cluster >= len(groups):
+        cluster = -1
+
+    group = groups[cluster]
+    group_embeddings = np.array([voice_embeddings[i] for i in group])
+    center = group_embeddings.mean(axis=0)
+    center = center/np.linalg.norm(center)    
+
+    group = sorted([{
+        "voice": voices[i],
+        "similarity": center @ voice_embeddings[i].T
+    } for i in group], key=lambda v: v["similarity"], reverse=True)
+
+    return render(request, "people/voice-dashboard.html", {"group_range": range(len(groups)), "cluster_count":len([g for g in groups if len(g) > 1]), "group": group})
+    

@@ -43,6 +43,7 @@ def visualize_content():
         voice_embedding=None).order_by("ordering")
     v = np.array([point.voice_embedding for point in points])
     X = v @ v.T
+    print(X)
 
     voices = []
     c = []

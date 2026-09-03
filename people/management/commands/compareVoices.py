@@ -14,11 +14,11 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         np.set_printoptions(precision=3, suppress=True, threshold=sys.maxsize, linewidth=sys.maxsize)
 
-        c_1 = Voice.objects.get(id=2687).voice_embedding
+        #c_1 = Voice.objects.get(id=2687).voice_embedding
         #c_2 = np.array([voice.voice_embedding for voice in Person.objects.get(id=1308).voices.all()])
 
         all_voice_centers = np.array([voice.voice_embedding for voice in Voice.objects.all()])
-        print(all_voice_centers @ c_1.T)
+        #print(all_voice_centers @ c_1.T)
         print(all_voice_centers @ all_voice_centers.T)
 
         centers = []
