@@ -30,10 +30,11 @@ class AttachmentManager(models.Manager):
 
         reserved_args = []
 
-        for worker in reserved.keys():
-            for task in reserved[worker]:
-                if task['name'] == "attachments.tasks.populate_attachment_data_task":
-                    reserved_args.append(task['args'][0])
+        if reserved:
+            for worker in reserved.keys():
+                for task in reserved[worker]:
+                    if task['name'] == "attachments.tasks.populate_attachment_data_task":
+                        reserved_args.append(task['args'][0])
 
         for attachment in attachments:
             if not attachment.pk in reserved_args:
