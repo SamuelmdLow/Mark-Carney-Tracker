@@ -13,6 +13,7 @@ from timezonefinder import TimezoneFinder
 import datetime
 import asyncio
 from asgiref.sync import sync_to_async
+import re
 
 # Create your models here.
 
@@ -23,13 +24,17 @@ class LocationManager(models.Manager):
         '''
         geolocator = Nominatim(user_agent="carneyTracker")
 
+        geoname = re.sub(r"\s+", " ", geoname)
+        geoname = re.sub(r"^\s+", "", geoname)
+        geoname = re.sub(r"\s+$", "", geoname)
+
         if any(s in geoname for s in ["National Capital Region", "Canada"]):
             geoname = "Ottawa, Ontario"
 
         geoname = geoname.replace("National Historic Site", "") # due to https://www.pm.gc.ca/en/news/media-advisories/2026/07/21/wednesday-july-22-2026
         geoname = geoname.replace("Nunastsiaq", "Northwest Territories") # due to https://www.pm.gc.ca/en/news/news-releases/2025/07/24/kanatup-siluviuqtimmarigat-carney-ammaly-inuit-sivuluiqtit-katimay
 
-        if not await Location.objects.filter(name=geoname).aexists():
+        if not await Location.objects.filter(name__iexact=geoname).aexists():
             geocode = geolocator.geocode(geoname)
             
             if geocode is None:

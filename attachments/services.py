@@ -412,6 +412,9 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                 image = soup.find(
                     "meta", property="og:image")["content"]
 
+                if image[0] == "/":
+                    image = "https://www.cpac.ca" + image
+
                 video = soup.find("meta", property="og:video")[
                     "content"][:-len(".mu38")]
 
@@ -446,11 +449,12 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
 
                 query = str(response.url).split("?")[-1]
 
+                attachment = await Attachment.objects.filter(source__endswith=query).afirst()
+
                 if not schedule_item:
                     # Replace with creation of schedule item from attachment content
                     terms = ["PM Carney", "PM Mark Carney"]
                     if any([title[:len(term)] == term for term in terms]):
-
                         content = description
                         content_split = content.split(". ")
 
@@ -459,16 +463,23 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                                 content = ". ".join(content_split[:i]) + "."
                                 break
 
-                        schedule_item = await ScheduleItem.objects.acreate(
-                            content=content,
-                            datetime=attachment_datetime,
-                            source=response.url,
-                        )
+                        if attachment and "cpac.ca" in attachment.schedule_item.source:
+                            schedule_item = attachment.schedule_item
+                            schedule_item.content = content
+                            schedule_item.source = response.url
+                            await schedule_item.asave()
+                        else:
+                            if attachment:
+                                attachment_datetime = attachment.published_at
+                            schedule_item = await ScheduleItem.objects.acreate(
+                                content=content,
+                                datetime=attachment_datetime,
+                                source=response.url,
+                            )
                     else:
                         await Attachment.objects.filter(source__endswith=query).adelete()
                         return None
 
-                attachment = await Attachment.objects.filter(source__endswith=query).afirst()
                 if attachment:
                     attachment.title = title
                     attachment.content = description
@@ -559,8 +570,10 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False
 
-                if await Attachment.objects.filter(source=url.find("loc").text).aexists():
-                    return False
+                matching_attachment = await Attachment.objects.filter(source=url.find("loc").text).afirst()
+                if matching_attachment:
+                    if not "https://cpac-ca-live.cdn.vustreams.com/groupa/live/" in matching_attachment.json['video_m3u8']:
+                        return False
 
                 necessary_terms = ["carney", "headline-politics"]
 

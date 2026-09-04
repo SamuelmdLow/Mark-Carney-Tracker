@@ -29,7 +29,8 @@ app.conf.beat_schedule = {
 }
 
 app.conf.task_routes = {
-    'attachments.tasks.populate_attachment_data_task': {'queue': 'transcription'}
+    'attachments.tasks.populate_attachment_data_task': {'queue': 'transcription'},
+    'attachments.tasks.generate_voice_embedding_task': {'queue': 'transcription'},
 }
 
 

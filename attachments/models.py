@@ -4,6 +4,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from django.contrib.contenttypes.fields import GenericRelation
 
+from pm_tracker.celery import app
+
 from pgvector.django import VectorField, CosineDistance
 
 from semantic_index.models import SemanticIndex
@@ -23,8 +25,19 @@ class AttachmentManager(models.Manager):
         attachments = Attachment.objects.bulk_create(
             objects, update_conflicts=True, update_fields=update_fields, unique_fields=unique_fields)
 
+        i = app.control.inspect()
+        reserved = i.reserved()
+
+        reserved_args = []
+
+        for worker in reserved.keys():
+            for task in reserved[worker]:
+                if task['name'] == "attachments.tasks.populate_attachment_data_task":
+                    reserved_args.append(task['args'][0])
+
         for attachment in attachments:
-            populate_attachment_data_task.delay_on_commit(attachment.pk)
+            if not attachment.pk in reserved_args:
+                populate_attachment_data_task.delay_on_commit(attachment.pk)
 
         return attachments
 
