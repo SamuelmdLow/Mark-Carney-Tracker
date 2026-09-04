@@ -17,3 +17,15 @@ class Voice(models.Model):
     voice_embedding = VectorField(dimensions=192)
 
     attachment = models.ForeignKey(to="attachments.Attachment", blank=True, null=True, default=None, on_delete=models.CASCADE)
+
+    def save(self, *args, **kwargs):
+        from attachments.models import AttachmentContent
+        super().save(*args, **kwargs)
+
+        contents = list(self.contents.all())
+        for content in contents:
+            if self.person_confirmed or not content.attribution_confirmed:
+                content.attribution = self.person
+                content.attribution_confirmed = self.person_confirmed
+
+        AttachmentContent.objects.bulk_update(contents, ['attribution', 'attribution_confirmed'])

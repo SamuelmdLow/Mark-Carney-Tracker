@@ -6,10 +6,10 @@
 
     {% if group %}
         <script>
-            function addContents(voice_id, attachment_id) {                    
-                const detail = document.querySelectorAll('[voice="' + String(voice_id) + '"]')[0];
-                fetch("/api/attachment_contents/?attachment=" + String(attachment_id) + "&format=json").then(response => response.json()).then(json => json.results).then(results => {
-                    for (let r of results) {
+            function addContents(next, detail, voice_id) {
+                fetch(next).then(response => response.json()).then(json => {
+                    console.log(json);
+                    for (let r of json.results) {
                         const p = document.createElement("p");
                         p.innerHTML = r.data.text;
                         if (r.voice == voice_id) {
@@ -18,34 +18,90 @@
                         }
                         detail.appendChild(p);
                     }
+                    if (json.next) {
+                        addContents(json.next, detail, voice_id);
+                    }
                 });
+            }
+            function firstAddContents(voice_id, attachment_id) {                    
+                const detail = document.querySelectorAll('[voice="' + String(voice_id) + '"]')[0];
+                const next = "/api/attachment_contents/?attachment=" + String(attachment_id) + "&format=json";
+                addContents(next, detail, voice_id);
             }
         </script>
 
 
         <div class="group">
+        
+        <script>
+            function selectAll() {
+                const button = document.getElementById('select-all');
+                const bool = (button.getAttribute('select') == 'true') 
+                button.setAttribute('select', (!bool).toString());
+                const checkbox = document.querySelectorAll('[type="checkbox"]');
+                for (let box of checkbox) {
+                    box.checked = bool;
+                }
+                button.innerHTML = "All " + (!bool).toString();
+            }
+        </script>
+        <button id="select-all" select="true" onclick="selectAll()">All true</button>
+        <form id="form">
         {% for voice in group %}
             <details voice="{{voice.voice.id}}">
-                <summary>
-                    <h3>{{voice.similarity}} 
-                        <a href="/admin/people/voice/{{voice.voice.id}}/change/">Voice {{voice.voice.id}}</a>
-                        {% if voice.voice.person_confirmed and voice.voice.person %} (<a href="/admin/people/person/{{voice.voice.person.id}}/change/">{{voice.voice.person.name}}</a>){%endif%} 
-                        - <a href="{{voice.voice.attachment.source}}">{{voice.voice.attachment.title}}</a></h3>
+                <summary {% if voice.voice.person_confirmed %}class="confirmed"{% endif %} onclick="firstAddContents({{voice.voice.id}}, {{voice.voice.attachment.id}})">
+                    <input type="checkbox" name="voice" value="{{voice.voice.id}}">
+
+                    <h3><span class="similarity">{{voice.similarity}}</span>  <a href="/admin/people/voice/{{voice.voice.id}}/change/">Voice {{voice.voice.id}}</a></h3>
+                        
+                    <p>{% if voice.voice.person %}<a href="/admin/people/person/{{voice.voice.person.id}}/change/">{{voice.voice.person.name}}</a> - {% endif %}<a href="{{voice.voice.attachment.source}}">{{voice.voice.attachment.title}}</a></p>
+
                 </summary>
-                {% comment %}
-                {% for content in voice.voice.attachment.contents.all %}
-                    {% if content.voice == voice.voice %}
-                        <p class="highlight"><span class="time">{{content.ordering|floatformat}}</span>  {{content.data.text}}</p>
-                    {% else %}
-                        <p>{{content.data.text}}</p>
-                    {% endif %}
-                {% endfor %}
-                {% endcomment %}
-                <script>
-                    addContents({{voice.voice.id}}, {{voice.voice.attachment.id}});
-                </script>
             </details>
         {% endfor %}
+
+        <select name="speaker" id="speaker">
+            <option value="NULL">------</option>
+            {% for speaker in speakers %}
+            <option value="{{speaker.id}}">{{speaker.name}}</option>
+            {% endfor %}
+        </select>
+        {% csrf_token %}
+        </form>
+
+        <script>
+            function apiRequest(){
+                const f = new FormData(document.getElementById("form"));
+                const voices = f.getAll("voice")
+                let speaker = f.get("speaker");
+                const csrftoken = f.get("csrfmiddlewaretoken");
+
+                if (speaker=="NULL") {
+                    speaker = null;
+                }
+
+                fetch("/api/add-voices/", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        "speaker": speaker,
+                        "voices": voices,
+                    }),
+                    headers: {
+                        'X-CSRFToken': csrftoken,
+                        "Content-type": "application/json; charset=UTF-8"
+                    }
+                }).then(response => {
+                    if (response.status == 200) {
+                        window.location.reload();
+                    }
+                    alert(String(response.status));
+                });
+            }
+        </script>
+
+        
+        <button onclick="apiRequest()">Add voices</button>
+
         </div>
     {% endif %}
 
@@ -80,13 +136,27 @@
         }
         summary h3 {
             display: contents;
+            font-size: 0.75em;
+            font-family: sans-serif;
+        }
+        summary p {
+            font-size: 1em;
+            font-weight: 600;
+            font-family: sans-serif;
         }
         summary {
             position: relative;
+            background: #d8d8d8;
+        }
+        summary.confirmed {
+            background: #cfeecf;
         }
         .time {
             font-weight: bold;
             font-size: 0.9em;
+        }
+        .similarity {
+            font-weight: normal;
         }
     </style>
 </html>

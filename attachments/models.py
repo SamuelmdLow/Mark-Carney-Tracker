@@ -96,7 +96,7 @@ class Attachment(models.Model):
         return list(self.contents.all()
                     .annotate(score=1-CosineDistance('embedding', query_embedding))
                     .order_by("ordering")
-                    .values("data", "score"))
+                    .values("data", "score", "attribution_id", "attribution__name", "attribution_confirmed", "voice_id"))
 
     def populate(self):
         from attachments.services import M3U8, audio_urls_to_np, voice_embed_segments
@@ -156,26 +156,46 @@ class Attachment(models.Model):
 
         ELBOW_THRESHOLD = 0.9
         DISTANCE_THRESHOLD = 0.2
+        SPEAKER_THRESHOLD = 0.6
 
-        Voice.objects.filter(attachment=self).delete()
         lines = list(self.contents.exclude(voice_embedding=None))
         if len(lines) > 0:
             voice_embeddings = np.array(
                 [line.voice_embedding for line in lines])
 
+            # Get voice clusters
             best_fit = kmeans_elbow(
                 voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
-            print(f" {len(best_fit)} {self.title}")
+            
+            new_voices = [Voice(voice_embedding=voice_embedding, attachment=self) for voice_embedding in best_fit]
 
-            new_voices = Voice.objects.bulk_create([Voice(
-                voice_embedding=voice_embedding, attachment=self) for voice_embedding in best_fit])
+            # Label voice clusters with speakers
+            confirmed_speakers = list(Voice.objects.filter(person_confirmed=True))
+            speakers = [voice.person for voice in confirmed_speakers]
+            labeled_voices = np.array([voice.voice_embedding for voice in confirmed_speakers])
+            speaker_sim_matrix = best_fit @ labeled_voices.T
+            speaker_labels = speaker_sim_matrix.argmax(axis=1).tolist()
+            speaker_sims = speaker_sim_matrix.max(axis=1).tolist()
+            
+            for voice, sim, label in zip(new_voices, speaker_sims, speaker_labels):
+                if sim > SPEAKER_THRESHOLD:
+                    voice.person = speakers[label]
 
+            # Delete old attachment voices
+            Voice.objects.filter(attachment=self).delete()
+
+            # Create new attachment voices
+            new_voices = Voice.objects.bulk_create(new_voices)
+
+            # Label contents with voices
             sims = voice_embeddings @ best_fit.T
             labels = sims.argmax(axis=1)
             for line, label in zip(lines, labels):
                 line.voice = new_voices[label]
-                line.attribution = new_voices[label].person
+                if not line.attribution_confirmed:
+                    line.attribution = new_voices[label].person
 
+            # Update contents
             AttachmentContent.objects.bulk_update(
                 lines, ["voice", "attribution"])
 
@@ -215,6 +235,7 @@ class AttachmentContent(models.Model):
                               null=True, blank=True, default=None, on_delete=models.SET_NULL)
     attribution = models.ForeignKey(
         to="people.person", related_name='contents', null=True, blank=True, default=None, on_delete=models.SET_NULL)
+    attribution_confirmed = models.BooleanField(default=False, help_text="True when attribution is manually confirmed as belonging to the attached person")
 
     attachment = models.ForeignKey(
         Attachment, related_name='contents', on_delete=models.CASCADE)
