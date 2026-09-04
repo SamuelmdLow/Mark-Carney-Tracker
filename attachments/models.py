@@ -185,15 +185,16 @@ class Attachment(models.Model):
 
             # Label voice clusters with speakers
             confirmed_speakers = list(Voice.objects.filter(person_confirmed=True))
-            speakers = [voice.person for voice in confirmed_speakers]
-            labeled_voices = np.array([voice.voice_embedding for voice in confirmed_speakers])
-            speaker_sim_matrix = best_fit @ labeled_voices.T
-            speaker_labels = speaker_sim_matrix.argmax(axis=1).tolist()
-            speaker_sims = speaker_sim_matrix.max(axis=1).tolist()
-            
-            for voice, sim, label in zip(new_voices, speaker_sims, speaker_labels):
-                if sim > SPEAKER_THRESHOLD:
-                    voice.person = speakers[label]
+            if len(confirmed_speakers) > 0:
+                speakers = [voice.person for voice in confirmed_speakers]
+                labeled_voices = np.array([voice.voice_embedding for voice in confirmed_speakers])
+                speaker_sim_matrix = best_fit @ labeled_voices.T
+                speaker_labels = speaker_sim_matrix.argmax(axis=1).tolist()
+                speaker_sims = speaker_sim_matrix.max(axis=1).tolist()
+                
+                for voice, sim, label in zip(new_voices, speaker_sims, speaker_labels):
+                    if sim > SPEAKER_THRESHOLD:
+                        voice.person = speakers[label]
 
             # Delete old attachment voices
             Voice.objects.filter(attachment=self).delete()
