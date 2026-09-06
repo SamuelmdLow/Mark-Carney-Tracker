@@ -7,5 +7,5 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # 
-        attachment = Attachment.objects.filter(id=330).first()
+        attachment = Attachment.objects.filter(id=1579).first()
         populate_attachment_data_task.delay(attachment.pk)

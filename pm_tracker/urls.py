@@ -24,7 +24,7 @@ from rest_framework import routers
 from graphene_django.views import GraphQLView
 
 from schedule_items.views import LocationViewSet, ScheduleItemsViewSet
-from attachments.views import AttachmentViewSet, AttachmentContentViewSet
+from attachments.views import AttachmentViewSet, AttachmentContentViewSet, questionAnswerApi
 from semantic_index.views import SemanticIndexViewSet
 
 from people.views import voices_dashboard, voices_cluster, add_voices_to_speaker
@@ -40,6 +40,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/", include(router.urls)),
     path("api/add-voices/", add_voices_to_speaker),
+    path("api/question/<int:person_id>/", questionAnswerApi),
+
     path("api-auth/", include("rest_framework.urls")),
 
     path("graphql", csrf_exempt(GraphQLView.as_view(graphiql=True))),

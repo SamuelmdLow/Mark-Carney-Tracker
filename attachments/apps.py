@@ -2,11 +2,14 @@ from django.conf import settings
 from django.apps import AppConfig
 from faster_whisper import WhisperModel
 from speechbrain.inference.speaker import EncoderClassifier
+from sentence_transformers import CrossEncoder
+import torch
 
 class AttachmentsConfig(AppConfig):
     name = "attachments"
     _transcription_model = None
     _speaker_model = None
+    _q_and_a_model = None
 
     def ready(self):
         import torch
@@ -27,3 +30,10 @@ class AttachmentsConfig(AppConfig):
             self._speaker_model = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
         
         return self._speaker_model
+
+    @property
+    def q_and_a_model(self):
+        if not self._q_and_a_model:
+            self._q_and_a_model = CrossEncoder(
+            "cross-encoder/ms-marco-TinyBERT-L2-v2", activation_fn=torch.nn.Sigmoid())
+        return self._q_and_a_model

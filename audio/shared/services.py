@@ -72,8 +72,6 @@ def transcribe_audio(model, audio, initial_prompt="") -> list[dict]:
     segments, transcriptionInfo = model.transcribe(
         audio, word_timestamps=True, initial_prompt=initial_prompt, multilingual=True, hotwords=hotwords)
 
-    print(transcriptionInfo)
-
     def reduce_words(word: dict):
         return {
             "word": word.word,

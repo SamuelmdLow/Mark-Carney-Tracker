@@ -2,6 +2,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from django.conf import settings
 from pgvector.django import CosineDistance
+from django.forms.models import model_to_dict
 
 from semantic_index.models import SemanticIndex
 from schedule_items.models import ScheduleItem
@@ -92,23 +93,24 @@ class M3U8():
     def get_audio_urls(self, name=None):
         return async_to_sync(self.aget_audio_urls)(name=name)
 
-    def transcribe(self, initial_prompt=None, group_size=200):
+    def transcribe(self, initial_prompt=None, group_size=100):
         audio_urls = self.get_audio_urls()
 
         return audio_urls_to_transcription(audio_urls, initial_prompt=initial_prompt, group_size=group_size)
 
 
 def transcribe_segment(audio_urls: list[str], initial_prompt):
-    
+
     if settings.AWS_ACCESS_KEY_ID:
-        
+
         config = botocore.config.Config(
             read_timeout=900,
             connect_timeout=900,
             retries={"max_attempts": 0}
         )
 
-        client = boto3.client('lambda', region_name=settings.AWS_REGION, config=config)
+        client = boto3.client(
+            'lambda', region_name=settings.AWS_REGION, config=config)
         payload = {
             "audio_urls": audio_urls,
             "initial_prompt": initial_prompt,
@@ -126,7 +128,7 @@ def transcribe_segment(audio_urls: list[str], initial_prompt):
 
         print(result)
         return result["transcript"], result["segment_durations"]
-    
+
     audio, segment_durations = audio_urls_to_np(audio_urls)
     transcription_model = apps.get_app_config(
         'attachments').transcription_model
@@ -186,7 +188,7 @@ def resegment_transcript_to_sentences(segments: list[dict]):
     return resegmented
 
 
-def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=200, overlap=5) -> list[dict]:
+def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=100, overlap=5) -> list[dict]:
     '''
     Creates overlapping audio segments, transcribes them, and then merges the transcripts together, skipping overlapping segments. Returns a list of transcript segments.
     '''
@@ -202,7 +204,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
         for i in range(len(transcription)):
             newGap = abs(overlap_skip - transcription[i][moment])
             print(f"{overlap_skip} {newGap} {previous_gap}")
-            if previous_gap!=None and newGap > previous_gap:
+            if previous_gap != None and newGap > previous_gap:
                 return transcription[i-1:]
             previous_gap = newGap
         return []
@@ -234,7 +236,8 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
 
         print(f"{overlap_skip}")
 
-        transcription_segment, segment_durations = transcribe_segment(group, initial_prompt)
+        transcription_segment, segment_durations = transcribe_segment(
+            group, initial_prompt)
 
         transcription = skip_overlap_in_transcript(
             transcription_segment, overlap_skip=overlap_skip, moment=moment)
@@ -271,11 +274,16 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
         transcript += transcription
         adjustment += sum(segment_durations[:group_size-overlap])
 
+    # Remove hallucinatd segments
+    transcript = [
+        segment for segment in transcript if segment['end'] > segment['start']]
+
     return resegment_transcript_to_sentences(transcript)
 
 
 def voice_embed_segments(audio, segments, sample_rate=16000):
     audio = torch.tensor(audio)
+
     def generate_slice(segment):
         MIN_DURATION = 1/16
 
@@ -284,13 +292,26 @@ def voice_embed_segments(audio, segments, sample_rate=16000):
 
         start = int((mid - duration/2) * sample_rate)
         end = int((mid + duration/2) * sample_rate)
-        return slice(start,end)
+        return slice(start, end)
 
     wavs = [audio[generate_slice(segment)] for segment in segments]
     classifier = apps.get_app_config('attachments').speaker_model
-    
-    embeds = [classifier.encode_batch(wav)[0][0][:] for wav in wavs]
-    embeds = [unnormalized_embed/np.linalg.norm(unnormalized_embed) for unnormalized_embed in embeds]
+
+    #embeds = [classifier.encode_batch(wav)[0][0][:] for wav in wavs]
+
+    embeds = []
+    for i, wav in enumerate(wavs):
+        try:
+            unnormalized_embed = classifier.encode_batch(wav)[0][0][:]
+            embeds.append(unnormalized_embed/np.linalg.norm(unnormalized_embed))
+        except Exception as e:
+            embeds.append(None)
+            print(e)
+            print(wav)
+            print(segments[i])
+
+    #embeds = [unnormalized_embed /
+    #          np.linalg.norm(unnormalized_embed) for unnormalized_embed in embeds]
 
     return embeds
 
@@ -380,6 +401,128 @@ def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
         s["text"]) > MIN_SEGMENT_LENGTH, segmented_texts))
 
     return segmented_texts
+
+
+def questionAnswer(query, person):
+    from attachments.models import AttachmentContent
+    MAX_GAP = 2
+    MAX_PASSAGE_DURATION = 240
+    CONSIDERED_PASSAGES = 50
+    ANSWER_THRESHOLD = 0.5
+
+    semantic_model = apps.get_app_config('semantic_index').model
+    qa_model = apps.get_app_config('attachments').q_and_a_model
+
+    query_embed = semantic_model.encode(query)
+
+    core_passages = AttachmentContent.objects.alias(distance=CosineDistance(
+        "embedding", query_embed)).filter(attribution=person).order_by("distance")[:CONSIDERED_PASSAGES]
+    passages_segments = [list(AttachmentContent.objects.filter(attachment=content.attachment, 
+                                                               ordering__gt=content.ordering - MAX_PASSAGE_DURATION/2,
+                                                               ordering__lt=content.ordering+MAX_PASSAGE_DURATION/2, 
+                                                               attribution=person)) for content in core_passages]
+
+    new_passages = []
+    ids = []
+    for passage_segments, core_passage in zip(passages_segments, core_passages):
+        gaps = [next.data['start'] - cur.data['end']
+                for cur, next in zip(passage_segments[:-1], passage_segments[1:])]
+        gapThresholds = list(map(lambda g: g > MAX_GAP, gaps))
+
+        i = passage_segments.index(core_passage)
+
+        end = len(passage_segments) - i
+        if True in gapThresholds[i:]:
+            end = gapThresholds[i:].index(True) + 1
+
+        start = i
+        if True in gapThresholds[:i]:
+            start = list(reversed(gapThresholds[:i])).index(True)
+
+        id = f"{passage_segments[i-start]}-{passage_segments[i+end-1]}"
+        if not passage_segments[i-start: i+end] in new_passages:
+            new_passages.append(passage_segments[i-start: i+end])
+            ids.append(id)
+
+    def segements_to_text(segments):
+        return " ".join([c.data['text'] for c in segments])
+
+    def narrow_responses(passages, answers=[]):
+
+        if len(passages) == 0:
+            return answers
+
+        partitions = []
+        partitions_key = []
+        for i, passage in enumerate(passages):
+            passage_partitions = []
+            if len(passage) <= 1:
+                passage_partitions.append(passage)
+            else:
+                passage_partitions += [
+                    passage,
+                    passage[0:len(passage)//2],
+                    passage[len(passage)//2:],
+                ]
+
+                if len(passage) >= 4:
+                    passage_partitions += [
+                        passage[len(passage)//4:len(passage)-(len(passage)//4)]]
+
+                if len(passage) > 4:
+                    passage_partitions += [
+                        passage[1:],
+                        passage[:-1]
+                    ]
+
+            partitions += passage_partitions
+            partitions_key += [i for _ in range(len(passage_partitions))]
+
+        partition_text = [segements_to_text(
+            partition) for partition in partitions]
+
+        ranking = qa_model.rank(query, partition_text)
+
+        new_passages = []
+        ids = []
+        for i, passage in enumerate(passages):
+            offset = partitions_key.index(i)
+            passage_rankings = [
+                rank for rank in ranking if partitions_key[rank['corpus_id']] == i]
+
+            new_passage = None
+
+            if passage_rankings[0]['corpus_id'] - offset == 0:
+                answers.append((passage, passage_rankings[0]['score']))
+            elif passage_rankings[0]['corpus_id'] - offset == 1 and len(passage)//4 > 1:
+                new_passage = passage[:len(passage)-(len(passage)//4)]
+            elif passage_rankings[0]['corpus_id'] - offset == 2 and len(passage)//4 > 1:
+                new_passage = passage[len(passage)//4:]
+            else:
+                new_passage = partitions[passage_rankings[0]['corpus_id']]
+
+            if new_passage:
+                id = f"{new_passage[0].id}-{new_passage[-1].id}"
+                if not id in ids:
+                    new_passages.append(new_passage)
+                    ids.append(id)
+
+        return narrow_responses(new_passages, answers=answers)
+
+    answers = []
+    for passage, score in narrow_responses(new_passages):
+
+        if score > ANSWER_THRESHOLD:
+            attachment = passage[0].attachment
+            answers.append({
+                "passage": segements_to_text(passage),
+                "attachment": model_to_dict(attachment),
+                "time": attachment.published_at,
+                "score": score})
+
+    answers = sorted(answers, key=lambda a: a["time"], reverse=True)
+
+    return answers
 
 
 # CPAC Attachments

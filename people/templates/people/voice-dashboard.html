@@ -1,7 +1,7 @@
 <html>
 
     <div class="nav">
-    {% for num in group_range %}{% if num < cluster_count %}<a href="{% url 'voices_cluster' cluster=num %}">{{num}}</a>{% endif %}{% endfor %}
+    {% for num in group_range %}{% if num < cluster_count %}<a href="{% url 'voices_cluster' cluster=num %}">{{num}}</a> {% endif %}{% endfor %}
     </div>
 
     {% if group %}
@@ -25,8 +25,11 @@
             }
             function firstAddContents(voice_id, attachment_id) {                    
                 const detail = document.querySelectorAll('[voice="' + String(voice_id) + '"]')[0];
-                const next = "/api/attachment_contents/?attachment=" + String(attachment_id) + "&format=json";
-                addContents(next, detail, voice_id);
+                if (detail.getAttribute("filled")=="false") {
+                    const next = "/api/attachment_contents/?attachment=" + String(attachment_id) + "&format=json";
+                    addContents(next, detail, voice_id);
+                    detail.setAttribute("filled", "true")
+                }
             }
         </script>
 
@@ -48,7 +51,7 @@
         <button id="select-all" select="true" onclick="selectAll()">All true</button>
         <form id="form">
         {% for voice in group %}
-            <details voice="{{voice.voice.id}}">
+            <details voice="{{voice.voice.id}}" filled="false">
                 <summary {% if voice.voice.person_confirmed %}class="confirmed"{% endif %} onclick="firstAddContents({{voice.voice.id}}, {{voice.voice.attachment.id}})">
                     <input type="checkbox" name="voice" value="{{voice.voice.id}}">
 

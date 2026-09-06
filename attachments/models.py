@@ -145,10 +145,8 @@ class Attachment(models.Model):
         self.save()
         return self
 
-    def transcribe(self, group_size=200):
+    def transcribe(self, group_size=100):
         from attachments.services import M3U8
-
-        print(f"group size: {group_size}")
 
         description = None
         if "description" in self.json:
