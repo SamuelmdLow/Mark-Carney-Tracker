@@ -1,6 +1,6 @@
 FROM public.ecr.aws/lambda/python:3.12
 
-ENV WHISPER_MODEL=large-v3-turbo
+ENV WHISPER_MODEL=small
 
 RUN dnf install -y tar xz wget
 RUN mkdir -p ffmpeg && \
