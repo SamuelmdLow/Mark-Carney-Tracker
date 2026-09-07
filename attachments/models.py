@@ -11,7 +11,7 @@ from pgvector.django import VectorField, CosineDistance
 from semantic_index.models import SemanticIndex
 
 import numpy as np
-
+import torch
 
 # Create your models here.
 
@@ -113,7 +113,7 @@ class Attachment(models.Model):
                     .values("data", "score", "attribution_id", "attribution__name", "attribution_confirmed", "voice_id"))
 
     def populate(self):
-        from attachments.services import M3U8, audio_urls_to_np, voice_embed_segments
+        from attachments.services import segments_to_voice_embed, segments_to_wavs, voice_embed_wavs
 
         data = self.json
 
@@ -124,12 +124,7 @@ class Attachment(models.Model):
             model = apps.get_app_config('semantic_index').model
             embeddings = model.encode([s['text'] for s in segments]).tolist()
 
-            m3u8_base_url = self.json['video_m3u8']
-            m3u8 = M3U8()
-            m3u8.load(m3u8_base_url)
-            audio, _ = audio_urls_to_np(m3u8.get_audio_urls())
-
-            voice_embeddings = voice_embed_segments(audio, segments)
+            voice_embeddings = segments_to_voice_embed(self.m3u8(), segments)
 
             AttachmentContent.objects.filter(attachment=self).delete()
             AttachmentContent.objects.bulk_create(
@@ -213,19 +208,15 @@ class Attachment(models.Model):
                 lines, ["voice", "attribution"])
 
     def regenerate_voice_embeddings(self):
-        from attachments.services import M3U8, audio_urls_to_np, voice_embed_segments
+        from attachments.services import segments_to_voice_embed
 
         if "video_m3u8" in self.json:
             contents = list(self.contents.order_by("ordering"))
             if len(contents) > 0:
                 segments = [content.data for content in contents]
-                m3u8_base_url = self.json['video_m3u8']
-                m3u8 = M3U8()
-                m3u8.load(m3u8_base_url)
-                audio, _ = audio_urls_to_np(m3u8.get_audio_urls())
 
-                voice_embeddings = voice_embed_segments(audio, segments)
-                
+                voice_embeddings = segments_to_voice_embed(self.m3u8(), segments)
+
                 for voice_embedding, content in zip(voice_embeddings, contents):
                     content.voice_embedding = voice_embedding
 
@@ -233,6 +224,64 @@ class Attachment(models.Model):
                     contents, ["voice_embedding"])
 
                 self.diarize()
+
+    def resegment_transcript(self):
+        from attachments.services import resegment_transcript_to_sentences, segments_to_voice_embed
+
+        if "video_m3u8" in self.json:
+            contents = list(self.contents.order_by("ordering"))
+            if len(contents) > 0:
+                modified_contents = []
+                segments = [content.data for content in contents]
+                resegments = resegment_transcript_to_sentences(segments)
+                                
+                for resegment in resegments:
+                    content = AttachmentContent.objects.filter(
+                        attachment=self,
+                        ordering=resegment["start"]).first()
+
+                    if content:
+                        if content.data['end'] != resegment['end']:
+                            content.data = resegment
+                            modified_contents.append(content)
+                    else:
+                        modified_contents.append(AttachmentContent(
+                            attachment=self,
+                            ordering=resegment['start'],
+                            data=resegment,
+                        ))
+                            
+                if len(modified_contents) > 0:
+                    print(f"{len(modified_contents)} {self.title}")
+                    model = apps.get_app_config('semantic_index').model
+                    embeddings = model.encode([c.data['text'] for c in modified_contents]).tolist()
+
+                    voice_embeddings = segments_to_voice_embed(self.m3u8(), [c.data for c in modified_contents])
+
+                    for content, embedding, voice_embedding in zip(modified_contents, embeddings, voice_embeddings):
+                        print(f" - {content.data['text']}")
+                        content.embedding = embedding
+                        content.voice_embedding = voice_embedding
+
+                    AttachmentContent.objects.bulk_create(modified_contents, update_conflicts=True, update_fields=['data', 'embedding', 'voice_embedding'], unique_fields=['id'])
+                    AttachmentContent.objects.filter(attachment=self).exclude(ordering__in=[resegment["start"] for resegment in resegments]).delete()
+
+    def m3u8(self):
+        from attachments.services import M3U8
+        if "video_m3u8" in self.json:
+            m3u8_base_url = self.json['video_m3u8']
+            m3u8 = M3U8()
+            m3u8.load(m3u8_base_url)
+            return m3u8
+        return None
+
+    def audio(self, seek_start=None, seek_end=None):
+        if "video_m3u8" in self.json:
+            m3u8 = self.m3u8()
+            audio, _ = m3u8.get_audio_np(seek_start=seek_start, seek_end=seek_end)
+            return audio
+        return None
+
 
     class Meta:
         ordering = ["-published_at"]

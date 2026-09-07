@@ -19,17 +19,24 @@ def audio_urls_to_ffmpeg(urls: list[str], sample_rate=16000) -> bytes:
         raise e
 
 
-def audio_urls_to_np(urls: list[str], sample_rate=16000):
-    audio_nps = []
+def audio_urls_to_np(urls: list[str], sample_rate=16000, batch_size=10):
 
-    for url in urls:
-        audio_ffmpeg = audio_urls_to_ffmpeg([url], sample_rate=sample_rate)
+    audio_nps = []
+    batched_urls = [urls[n:n+batch_size]
+                    for n in range(0, len(urls), batch_size)]
+
+    for batch in batched_urls:
+        audio_ffmpeg = audio_urls_to_ffmpeg(batch, sample_rate=sample_rate)
         audio_np = np.frombuffer(audio_ffmpeg, np.int16).flatten().astype(
             np.float32) / 32768.0
+
         audio_nps.append(audio_np)
-        
-    segment_durations = list(map(lambda audio_np: len(audio_np)/sample_rate, audio_nps))
+
+    if len(audio_nps) == 0:
+        return [], []
+    
     audio = np.concatenate(audio_nps)
+    segment_durations = [len(audio_np)/sample_rate for audio_np in audio_nps]
 
     return audio, segment_durations
 

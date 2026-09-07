@@ -27,6 +27,21 @@ import torch
 
 
 class M3U8():
+    def __init__(self):
+        self._audio_urls = None
+        self._audio_durations = None
+
+    @property
+    def audio_urls(self):
+        if self._audio_urls == None:
+            self._audio_urls, self._audio_durations = self.read_audio_file()
+        return self._audio_urls
+
+    @property
+    def audio_durations(self):
+        if self._audio_durations == None:
+            self._audio_urls, self._audio_durations = self.read_audio_file()
+        return self._audio_durations
 
     async def aload(self, m3u8_url_base: str):
         '''
@@ -63,7 +78,7 @@ class M3U8():
     def load(self, m3u8_url_base: str):
         return async_to_sync(self.aload)(m3u8_url_base)
 
-    async def aget_audio_urls(self, name=None) -> list[str]:
+    async def aread_audio_file(self, name=None) -> list[str]:
         '''
         Get audio urls listed in m3u8 file
         '''
@@ -84,22 +99,65 @@ class M3U8():
                 audio_lines = (await response.text()).split("\n#")
 
                 clip_marker = 'EXTINF'
-                clips = filter(lambda l: l[:len(clip_marker)]
-                               == clip_marker, audio_lines)
-                clip_urls = list(map(lambda l: self.m3u8_url_base +
-                                     l.split('\n')[1], clips))
-                return clip_urls
+                clips = list(filter(lambda l: l[:len(clip_marker)]
+                               == clip_marker, audio_lines))
 
-    def get_audio_urls(self, name=None):
-        return async_to_sync(self.aget_audio_urls)(name=name)
+                def read_duration(clip):
+                    return float(clip.split('\n')[0].split(':')[1].split(',')[0])
+
+                def get_url(clip):
+                    return self.m3u8_url_base + clip.split('\n')[1]
+
+                clip_urls = [get_url(clip) for clip in clips]
+                clip_durations = [read_duration(clip) for clip in clips]
+                
+
+                return clip_urls, clip_durations
+
+    def read_audio_file(self, name=None):
+        return async_to_sync(self.aread_audio_file)(name=name)
+
+    def get_audio_np(self, seek_start=None, seek_end=None, batch_size=1, sample_rate=16000):
+        urls = self.audio_urls
+        durations = self.audio_durations
+
+        if seek_start and seek_end and seek_end <= seek_start:
+            return [], []
+
+        clip_start = 0
+        clip_end = 0
+        if seek_start or seek_end:
+            start = 0
+            start_found = False
+            dur = 0
+            for i, duration in enumerate(durations):
+                dur += duration
+
+                if seek_start and dur > seek_start and not start_found:
+                    start_found = True
+                    clip_start = seek_start - (dur - duration)
+                    if seek_end:
+                        start = i
+                    else:
+                        urls = urls[i:]
+                        break
+
+                if seek_end and dur >= seek_end:
+                    urls = urls[start:i+1]
+                    clip_end = dur - seek_end
+                    break
+
+        audio_np, batch_durations = audio_urls_to_np(urls, sample_rate=sample_rate, batch_size=batch_size)
+
+        audio_np = audio_np[int(clip_start*sample_rate):len(audio_np) - int(clip_end*sample_rate)]
+
+        return audio_np, batch_durations
 
     def transcribe(self, initial_prompt=None, group_size=100):
-        audio_urls = self.get_audio_urls()
-
-        return audio_urls_to_transcription(audio_urls, initial_prompt=initial_prompt, group_size=group_size)
+        return audio_urls_to_transcription(self.audio_urls, initial_prompt=initial_prompt, group_size=group_size)
 
 
-def transcribe_segment(audio_urls: list[str], initial_prompt):
+def transcribe_segment(audio_urls: list[str], initial_prompt, audio_url_batch=1):
 
     if settings.AWS_ACCESS_KEY_ID:
 
@@ -113,6 +171,7 @@ def transcribe_segment(audio_urls: list[str], initial_prompt):
             'lambda', region_name=settings.AWS_REGION, config=config)
         payload = {
             "audio_urls": audio_urls,
+            "audio_url_batch": audio_url_batch,
             "initial_prompt": initial_prompt,
         }
 
@@ -126,10 +185,9 @@ def transcribe_segment(audio_urls: list[str], initial_prompt):
         result = json.loads(
             response['Payload'].read())
 
-        print(result)
         return result["transcript"], result["segment_durations"]
 
-    audio, segment_durations = audio_urls_to_np(audio_urls)
+    audio, segment_durations = audio_urls_to_np(audio_urls, batch_size=audio_url_batch)
     transcription_model = apps.get_app_config(
         'attachments').transcription_model
     transcript = transcribe_audio(
@@ -157,8 +215,10 @@ def resegment_body_to_sentences(segments: list[dict]):
 
 
 def resegment_transcript_to_sentences(segments: list[dict]):
+    MAX_DURATION = 60
+
     resegmented = []
-    new_segment = {"words": []}
+    new_segment_words = []
 
     for segment in segments:
         for word in segment["words"]:
@@ -166,26 +226,66 @@ def resegment_transcript_to_sentences(segments: list[dict]):
             current_word = word["word"].strip()
             previous_word = ''
 
-            if len(new_segment["words"]) > 0:
-                previous_word = new_segment["words"][-1]["word"].strip()
+            if len(new_segment_words) > 0:
+                previous_word = new_segment_words[-1]["word"].strip()
 
             prefixes = "(Mr|St|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|Inc|Ltd|Jr|Sr|Co)[.]"
+            punctuation_split = (len(current_word) > 0 and current_word[0].isupper()) and (len(previous_word) > 0 and not re.search(prefixes, previous_word) and previous_word[-1] in [".", "?"])
 
-            if (len(current_word) > 0 and current_word[0].isupper()) and (len(previous_word) > 0 and not re.search(prefixes, previous_word) and previous_word[-1] in [".", "?"]):
-                text = "".join(
-                    map(lambda w: w["word"], new_segment["words"])).strip()
-                while "  " in text:
-                    text = text.replace("  ", " ")
-                new_segment["text"] = text
-                new_segment["start"] = new_segment["words"][0]["start"]
-                new_segment["end"] = new_segment["words"][-1]["end"]
-                resegmented.append(copy.deepcopy(new_segment))
+            if punctuation_split:
+                
+                if new_segment_words[-1]["end"] - new_segment_words[0]["start"] > MAX_DURATION:
+                    resegmented += split_long_duration_words_into_segments(new_segment_words)
+                else:
+                    resegmented.append(words_to_segment(new_segment_words))
 
-                new_segment = {"words": [word]}
+                new_segment_words = [word]
             else:
-                new_segment["words"].append(word)
+                new_segment_words.append(word)
 
     return resegmented
+
+
+def words_to_segment(words):
+    if (len(words)) <= 0:
+        return None
+    text = "".join([w['word'] for w in words]).strip()
+    while "  " in text:
+        text = text.replace("  ", " ")
+    
+    return {
+        "text": text,
+        "words": words,
+        "start": words[0]["start"],
+        "end": words[-1]["end"]
+    }
+
+
+def split_long_duration_words_into_segments(all_words):
+    words_splits = split_long_duration_words(all_words)
+    for words in words_splits[:-1]:
+        words[-1]["word"] = words[-1]["word"] + "..."
+    return [words_to_segment(words) for words in words_splits]
+
+def split_long_duration_words(words):
+    MAX_DURATION = 25
+    MIN_WORD_COUNT = 5
+
+    if len(words) <= MIN_WORD_COUNT*2 or words[-1]['end']-words[0]['start'] < MAX_DURATION:
+        if len(words[0]["word"]) >= 2 and not words[0]["word"][1].isupper():
+            words[0]["word"] = words[0]["word"][0] + words[0]["word"][1:].capitalize()
+        return [words]
+
+    gaps = [words[i+1]['end'] - words[i]['start'] for i in range(len(words)-1)]
+    i = MIN_WORD_COUNT + np.argmax(gaps[MIN_WORD_COUNT:len(words)- (MIN_WORD_COUNT)])
+    if i == 0:
+        i = i + 1
+    else:
+        if words[i+1]["start"] - words[i]["end"] > words[i]["start"] - words[i-1]["end"]:
+            i = i + 1
+
+    return split_long_duration_words(words[:i]) + split_long_duration_words(words[i:])
+
 
 
 def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=100, overlap=5) -> list[dict]:
@@ -237,7 +337,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
         print(f"{overlap_skip}")
 
         transcription_segment, segment_durations = transcribe_segment(
-            group, initial_prompt)
+            group, initial_prompt, audio_url_batch=group_size-overlap)
 
         transcription = skip_overlap_in_transcript(
             transcription_segment, overlap_skip=overlap_skip, moment=moment)
@@ -272,7 +372,7 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
         print(f"{"\n".join([segment["text"] for segment in transcription])}")
 
         transcript += transcription
-        adjustment += sum(segment_durations[:group_size-overlap])
+        adjustment += segment_durations[0]
 
     # Remove hallucinatd segments
     transcript = [
@@ -281,26 +381,49 @@ def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size
     return resegment_transcript_to_sentences(transcript)
 
 
-def voice_embed_segments(audio, segments, sample_rate=16000):
+def segments_to_voice_embed(m3u8, segments, batch_duration=300):
+    batches = []
+    for segment in segments:
+        if len(batches) == 0:
+            batches.append([segment])
+        else:
+            if segment['end'] - batches[-1][0]['start'] > batch_duration:
+                batches.append([segment])
+            else:
+                batches[-1].append(segment)
+
+    voice_embeddings = []
+    for batch in batches:
+        wavs = segments_to_wavs(m3u8.get_audio_np(seek_start=batch[0]['start'], seek_end=batch[-1]['end'])[0], batch, offset=batch[0]['start'])
+        voice_embeddings += voice_embed_wavs(wavs)
+
+    return voice_embeddings
+
+
+def segments_to_wavs(audio, segments, offset=0, sample_rate=16000):
     audio = torch.tensor(audio)
 
     def generate_slice(segment):
         MIN_DURATION = 1/16
 
-        mid = (segment['start'] + segment['end'])/2
+        if segment['start'] >= segment['end']:
+            return slice(0,0)
+
+        mid = (segment['start'] + segment['end'])/2 - offset
         duration = max(segment['end'] - segment['start'], MIN_DURATION)
 
-        start = int((mid - duration/2) * sample_rate)
+        start = max(int((mid - duration/2) * sample_rate), 0)
         end = int((mid + duration/2) * sample_rate)
         return slice(start, end)
 
     wavs = [audio[generate_slice(segment)] for segment in segments]
+    return wavs
+
+def voice_embed_wavs(wavs):
     classifier = apps.get_app_config('attachments').speaker_model
 
-    #embeds = [classifier.encode_batch(wav)[0][0][:] for wav in wavs]
-
     embeds = []
-    for i, wav in enumerate(wavs):
+    for wav in wavs:
         try:
             unnormalized_embed = classifier.encode_batch(wav)[0][0][:]
             embeds.append(unnormalized_embed/np.linalg.norm(unnormalized_embed))
@@ -308,10 +431,6 @@ def voice_embed_segments(audio, segments, sample_rate=16000):
             embeds.append(None)
             print(e)
             print(wav)
-            print(segments[i])
-
-    #embeds = [unnormalized_embed /
-    #          np.linalg.norm(unnormalized_embed) for unnormalized_embed in embeds]
 
     return embeds
 

@@ -7,7 +7,7 @@
     {% if group %}
         <script>
             function addContents(next, detail, voice_id) {
-                fetch(next).then(response => response.json()).then(json => {
+                fetch(next.replace("http://", "https://")).then(response => response.json()).then(json => {
                     console.log(json);
                     for (let r of json.results) {
                         const p = document.createElement("p");

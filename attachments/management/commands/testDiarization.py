@@ -24,7 +24,7 @@ class Command(BaseCommand):
 
         m3u8 = M3U8()
         m3u8.load(m3u8_base_url)
-        urls = m3u8.get_audio_urls()[:10]
+        urls = m3u8.read_audio_file()[:10]
         
         audio, _ = audio_urls_to_np(urls)
         diarize(audio)

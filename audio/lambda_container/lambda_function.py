@@ -7,7 +7,8 @@ model = WhisperModel(model_size, device='cpu', compute_type='int8', download_roo
 
 def handler(event, context):
     audio_urls = event['audio_urls']
-    audio, segment_durations = audio_urls_to_np(audio_urls)
+    audio_url_batch = event['audio_url_batch']
+    audio, segment_durations = audio_urls_to_np(audio_urls, batch_size=audio_url_batch)
 
     initial_prompt = None
     if "initial_prompt" in event:
