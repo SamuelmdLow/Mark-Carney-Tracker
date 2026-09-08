@@ -16,7 +16,7 @@ def generate_voice_embedding_task(attachment_pk: int):
 def generate_content_voice_embedding_task(attachment_content_pk: int):
     content = AttachmentContent.objects.get(pk=attachment_content_pk)
     content.generate_voice_embedding()
-    return content.voice_embedding
+    return attachment_content_pk
 
 @shared_task
 def populate_attachment_data_task(attachment_pk: int):

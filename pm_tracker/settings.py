@@ -167,6 +167,7 @@ WHISPER_MODEL = env('WHISPER_MODEL', default="base")
 
 # Celery configuration
 CELERY_BROKER_URL = 'redis://redis:6379/0'
+CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
 
 # AWS configuration
 AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID', default=None)

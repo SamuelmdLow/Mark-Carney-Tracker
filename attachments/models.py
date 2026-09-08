@@ -11,10 +11,10 @@ from pgvector.django import VectorField, CosineDistance
 from semantic_index.models import SemanticIndex
 
 import numpy as np
-import torch
 
 # Create your models here.
 
+from celery import group
 
 class AttachmentManager(models.Manager):
 
@@ -147,7 +147,7 @@ class Attachment(models.Model):
                 data=segment,
                 embedding=embedding) for (segment, embedding) in zip(segments, embeddings)]
 
-            AttachmentContent.objects.bulk_create([contents])
+            AttachmentContent.objects.bulk_create(contents)
 
             self.generate_voice_embeddings()
 
@@ -228,10 +228,9 @@ class Attachment(models.Model):
         from attachments.tasks import generate_content_voice_embedding_task
 
         if "video_m3u8" in self.json:
-            for content in self.contents.all():
-                generate_content_voice_embedding_task.delay_on_commit(
-                    content.pk)
-
+            voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in self.contents.all()])
+            promise = voice_embedding_task_group()
+            promise.get()
             self.diarize()
 
     def resegment_transcript(self):
@@ -271,14 +270,15 @@ class Attachment(models.Model):
                         print(f" - {content.data['text']}")
                         content.embedding = embedding
 
-                    AttachmentContent.objects.bulk_create(modified_contents, update_conflicts=True, update_fields=[
+                    modified_contents = AttachmentContent.objects.bulk_create(modified_contents, update_conflicts=True, update_fields=[
                                                           'data', 'embedding', 'voice_embedding'], unique_fields=['id'])
-                    for content in modified_contents:
-                        generate_content_voice_embedding_task.delay_on_commit(
-                            content.pk)
-
                     AttachmentContent.objects.filter(attachment=self).exclude(
                         ordering__in=[resegment["start"] for resegment in resegments]).delete()
+
+                    voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in modified_contents])
+                    promise = voice_embedding_task_group()
+                    promise.get()
+                    self.diarize()
 
     def m3u8(self):
         from attachments.services import M3U8
@@ -321,21 +321,24 @@ class AttachmentContent(models.Model):
         import datetime
         import torch
 
-        audio = self.attachment.audio(
-            seek_start=self.data['start'], seek_end=self.data['end'])
-        if type(audio) != type(None):
-            classifier = apps.get_app_config('attachments').speaker_model
+        try:
+            audio = self.attachment.audio(
+                seek_start=self.data['start'], seek_end=self.data['end'])
+            if type(audio) != type(None):
+                classifier = apps.get_app_config('attachments').speaker_model
 
-            start = datetime.datetime.now()
-            wav = torch.Tensor(audio)
-            audio_start = datetime.datetime.now()
-            dur = self.data['end']-self.data['start']
-            print(f"{audio_start-start} {dur}\n     {self.data['text']}")
-            voice_embed = classifier.encode_batch(wav, normalize=True)[0][0][:]
-            print(
-                f"{datetime.datetime.now()-audio_start} {dur}\n     {self.data['text']}")
-            self.voice_embedding = voice_embed
-            self.save()
+                start = datetime.datetime.now()
+                wav = torch.Tensor(audio)
+                audio_start = datetime.datetime.now()
+                dur = self.data['end']-self.data['start']
+                print(f"{audio_start-start} {dur}\n     {self.data['text']}")
+                voice_embed = classifier.encode_batch(wav)[0][0][:]
+                print(
+                    f"{datetime.datetime.now()-audio_start} {dur}\n     {self.data['text']}")
+                self.voice_embedding = voice_embed / np.linalg.norm(voice_embed)
+                self.save()
+        except Exception as e:
+            print(e)
 
     class Meta:
         ordering = ['attachment', 'ordering']
