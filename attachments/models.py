@@ -15,6 +15,7 @@ import torch
 
 # Create your models here.
 
+
 class AttachmentManager(models.Manager):
 
     def bulk_create_and_index(self, objects):
@@ -22,6 +23,23 @@ class AttachmentManager(models.Manager):
 
         update_fields = ["schedule_item", "json", "title", "content", "source"]
         unique_fields = ["id"]
+
+        originals = [Attachment.objects.filter(
+            id=ob.id).first() for ob in objects]
+
+        def identify_relevant_changes(a_1, a_2):
+            # Identify if changes warrant running populate in the attachment
+            if not a_1 or not a_2:
+                return True
+
+            duration_change = ("video_duration" in a_1.json and not "video_duration" in a_2.json) or (
+                not "video_duration" in a_1.json and "video_duration" in a_2.json) or (a_1.json["video_duration"] != a_2.json["video_duration"])
+
+            return duration_change
+
+        changes = [identify_relevant_changes(
+            original, attachment) for attachment, original in zip(objects, originals)]
+
         attachments = Attachment.objects.bulk_create(
             objects, update_conflicts=True, update_fields=update_fields, unique_fields=unique_fields)
 
@@ -36,8 +54,8 @@ class AttachmentManager(models.Manager):
                     if task['name'] == "attachments.tasks.populate_attachment_data_task":
                         reserved_args.append(task['args'][0])
 
-        for attachment in attachments:
-            if not attachment.pk in reserved_args:
+        for attachment, change in zip(attachments, changes):
+            if not attachment.pk in reserved_args and change:
                 populate_attachment_data_task.delay_on_commit(attachment.pk)
 
         return attachments
@@ -113,8 +131,6 @@ class Attachment(models.Model):
                     .values("data", "score", "attribution_id", "attribution__name", "attribution_confirmed", "voice_id"))
 
     def populate(self):
-        from attachments.services import segments_to_voice_embed, segments_to_wavs, voice_embed_wavs
-
         data = self.json
 
         if "video_m3u8" in data:
@@ -124,18 +140,16 @@ class Attachment(models.Model):
             model = apps.get_app_config('semantic_index').model
             embeddings = model.encode([s['text'] for s in segments]).tolist()
 
-            voice_embeddings = segments_to_voice_embed(self.m3u8(), segments)
-
             AttachmentContent.objects.filter(attachment=self).delete()
-            AttachmentContent.objects.bulk_create(
-                [AttachmentContent(
-                    attachment=self,
-                    ordering=segment['start'],
-                    data=segment,
-                    embedding=embedding,
-                    voice_embedding=voice_embedding) for (segment, embedding, voice_embedding) in zip(segments, embeddings, voice_embeddings)])
+            contents = [AttachmentContent(
+                attachment=self,
+                ordering=segment['start'],
+                data=segment,
+                embedding=embedding) for (segment, embedding) in zip(segments, embeddings)]
 
-            self.diarize()
+            AttachmentContent.objects.bulk_create([contents])
+
+            self.generate_voice_embeddings()
 
         self.save()
         return self
@@ -173,18 +187,21 @@ class Attachment(models.Model):
             # Get voice clusters
             best_fit = kmeans_elbow(
                 voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
-            
-            new_voices = [Voice(voice_embedding=voice_embedding, attachment=self) for voice_embedding in best_fit]
+
+            new_voices = [Voice(voice_embedding=voice_embedding, attachment=self)
+                          for voice_embedding in best_fit]
 
             # Label voice clusters with speakers
-            confirmed_speakers = list(Voice.objects.filter(person_confirmed=True))
+            confirmed_speakers = list(
+                Voice.objects.filter(person_confirmed=True))
             if len(confirmed_speakers) > 0:
                 speakers = [voice.person for voice in confirmed_speakers]
-                labeled_voices = np.array([voice.voice_embedding for voice in confirmed_speakers])
+                labeled_voices = np.array(
+                    [voice.voice_embedding for voice in confirmed_speakers])
                 speaker_sim_matrix = best_fit @ labeled_voices.T
                 speaker_labels = speaker_sim_matrix.argmax(axis=1).tolist()
                 speaker_sims = speaker_sim_matrix.max(axis=1).tolist()
-                
+
                 for voice, sim, label in zip(new_voices, speaker_sims, speaker_labels):
                     if sim > SPEAKER_THRESHOLD:
                         voice.person = speakers[label]
@@ -207,26 +224,19 @@ class Attachment(models.Model):
             AttachmentContent.objects.bulk_update(
                 lines, ["voice", "attribution"])
 
-    def regenerate_voice_embeddings(self):
-        from attachments.services import segments_to_voice_embed
+    def generate_voice_embeddings(self):
+        from attachments.tasks import generate_content_voice_embedding_task
 
         if "video_m3u8" in self.json:
-            contents = list(self.contents.order_by("ordering"))
-            if len(contents) > 0:
-                segments = [content.data for content in contents]
+            for content in self.contents.all():
+                generate_content_voice_embedding_task.delay_on_commit(
+                    content.pk)
 
-                voice_embeddings = segments_to_voice_embed(self.m3u8(), segments)
-
-                for voice_embedding, content in zip(voice_embeddings, contents):
-                    content.voice_embedding = voice_embedding
-
-                AttachmentContent.objects.bulk_update(
-                    contents, ["voice_embedding"])
-
-                self.diarize()
+            self.diarize()
 
     def resegment_transcript(self):
-        from attachments.services import resegment_transcript_to_sentences, segments_to_voice_embed
+        from attachments.services import resegment_transcript_to_sentences
+        from attachments.tasks import generate_content_voice_embedding_task
 
         if "video_m3u8" in self.json:
             contents = list(self.contents.order_by("ordering"))
@@ -234,7 +244,7 @@ class Attachment(models.Model):
                 modified_contents = []
                 segments = [content.data for content in contents]
                 resegments = resegment_transcript_to_sentences(segments)
-                                
+
                 for resegment in resegments:
                     content = AttachmentContent.objects.filter(
                         attachment=self,
@@ -250,21 +260,25 @@ class Attachment(models.Model):
                             ordering=resegment['start'],
                             data=resegment,
                         ))
-                            
+
                 if len(modified_contents) > 0:
                     print(f"{len(modified_contents)} {self.title}")
                     model = apps.get_app_config('semantic_index').model
-                    embeddings = model.encode([c.data['text'] for c in modified_contents]).tolist()
+                    embeddings = model.encode(
+                        [c.data['text'] for c in modified_contents]).tolist()
 
-                    voice_embeddings = segments_to_voice_embed(self.m3u8(), [c.data for c in modified_contents])
-
-                    for content, embedding, voice_embedding in zip(modified_contents, embeddings, voice_embeddings):
+                    for content, embedding in zip(modified_contents, embeddings):
                         print(f" - {content.data['text']}")
                         content.embedding = embedding
-                        content.voice_embedding = voice_embedding
 
-                    AttachmentContent.objects.bulk_create(modified_contents, update_conflicts=True, update_fields=['data', 'embedding', 'voice_embedding'], unique_fields=['id'])
-                    AttachmentContent.objects.filter(attachment=self).exclude(ordering__in=[resegment["start"] for resegment in resegments]).delete()
+                    AttachmentContent.objects.bulk_create(modified_contents, update_conflicts=True, update_fields=[
+                                                          'data', 'embedding', 'voice_embedding'], unique_fields=['id'])
+                    for content in modified_contents:
+                        generate_content_voice_embedding_task.delay_on_commit(
+                            content.pk)
+
+                    AttachmentContent.objects.filter(attachment=self).exclude(
+                        ordering__in=[resegment["start"] for resegment in resegments]).delete()
 
     def m3u8(self):
         from attachments.services import M3U8
@@ -278,10 +292,10 @@ class Attachment(models.Model):
     def audio(self, seek_start=None, seek_end=None):
         if "video_m3u8" in self.json:
             m3u8 = self.m3u8()
-            audio, _ = m3u8.get_audio_np(seek_start=seek_start, seek_end=seek_end)
+            audio, _ = m3u8.get_audio_np(
+                seek_start=seek_start, seek_end=seek_end)
             return audio
         return None
-
 
     class Meta:
         ordering = ["-published_at"]
@@ -297,10 +311,31 @@ class AttachmentContent(models.Model):
                               null=True, blank=True, default=None, on_delete=models.SET_NULL)
     attribution = models.ForeignKey(
         to="people.person", related_name='contents', null=True, blank=True, default=None, on_delete=models.SET_NULL)
-    attribution_confirmed = models.BooleanField(default=False, help_text="True when attribution is manually confirmed as belonging to the attached person")
+    attribution_confirmed = models.BooleanField(
+        default=False, help_text="True when attribution is manually confirmed as belonging to the attached person")
 
     attachment = models.ForeignKey(
         Attachment, related_name='contents', on_delete=models.CASCADE)
+
+    def generate_voice_embedding(self):
+        import datetime
+        import torch
+
+        audio = self.attachment.audio(
+            seek_start=self.data['start'], seek_end=self.data['end'])
+        if type(audio) != type(None):
+            classifier = apps.get_app_config('attachments').speaker_model
+
+            start = datetime.datetime.now()
+            wav = torch.Tensor(audio)
+            audio_start = datetime.datetime.now()
+            dur = self.data['end']-self.data['start']
+            print(f"{audio_start-start} {dur}\n     {self.data['text']}")
+            voice_embed = classifier.encode_batch(wav, normalize=True)[0][0][:]
+            print(
+                f"{datetime.datetime.now()-audio_start} {dur}\n     {self.data['text']}")
+            self.voice_embedding = voice_embed
+            self.save()
 
     class Meta:
         ordering = ['attachment', 'ordering']

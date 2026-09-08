@@ -1,4 +1,4 @@
-from attachments.models import Attachment
+from attachments.models import Attachment, AttachmentContent
 
 from asgiref.sync import async_to_sync
 
@@ -8,8 +8,15 @@ from celery import shared_task
 @shared_task
 def generate_voice_embedding_task(attachment_pk: int):
     attachment = Attachment.objects.get(pk=attachment_pk)
-    attachment.regenerate_voice_embeddings()
-    return attachment.contents.all()
+    for c in attachment.contents.all():
+        generate_content_voice_embedding_task.delay_on_commit(c.pk)
+    return attachment.contents.all().count()
+
+@shared_task
+def generate_content_voice_embedding_task(attachment_content_pk: int):
+    content = AttachmentContent.objects.get(pk=attachment_content_pk)
+    content.generate_voice_embedding()
+    return content.voice_embedding
 
 @shared_task
 def populate_attachment_data_task(attachment_pk: int):
