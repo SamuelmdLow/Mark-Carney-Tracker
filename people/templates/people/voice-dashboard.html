@@ -1,13 +1,16 @@
 <html>
 
     <div class="nav">
-    {% for num in group_range %}{% if num < cluster_count %}<a href="{% url 'voices_cluster' cluster=num %}">{{num}}</a> {% endif %}{% endfor %}
+    {% for cluster in clusters %}{% if cluster.cluster.voices|length > 1 %}<a href="{% url 'voices_cluster' cluster=cluster.index %}">{{cluster.cluster.name}}</a>{% endif %}    {% endfor %}
     </div>
 
     {% if group %}
         <script>
             function addContents(next, detail, voice_id) {
-                fetch(next.replace("http://", "https://")).then(response => response.json()).then(json => {
+                if (window.location.protocol.includes("https")) {
+                    next = next.replace("http://", "https://");
+                }
+                fetch(next).then(response => response.json()).then(json => {
                     console.log(json);
                     for (let r of json.results) {
                         const p = document.createElement("p");
@@ -35,7 +38,7 @@
 
 
         <div class="group">
-        
+        <h1>{{group.name}}</h1>
         <script>
             function selectAll() {
                 const button = document.getElementById('select-all');
@@ -50,7 +53,7 @@
         </script>
         <button id="select-all" select="true" onclick="selectAll()">All true</button>
         <form id="form">
-        {% for voice in group %}
+        {% for voice in group.voices %}
             <details voice="{{voice.voice.id}}" filled="false">
                 <summary {% if voice.voice.person_confirmed %}class="confirmed"{% endif %} onclick="firstAddContents({{voice.voice.id}}, {{voice.voice.attachment.id}})">
                     <input type="checkbox" name="voice" value="{{voice.voice.id}}">
@@ -109,7 +112,7 @@
     {% endif %}
 
     <div class="nav">
-    {% for num in group_range %}{% if num >= cluster_count %}<a href="{% url 'voices_cluster' cluster=num %}">{{num}}</a>{% endif %}    {% endfor %}
+    {% for cluster in clusters %}{% if cluster.cluster.voices|length <= 1 %}<a href="{% url 'voices_cluster' cluster=cluster.index %}">{{cluster.cluster.name}}</a>{% endif %}    {% endfor %}
     </div>
 
 

@@ -8,8 +8,7 @@ from celery import shared_task
 @shared_task
 def generate_voice_embedding_task(attachment_pk: int):
     attachment = Attachment.objects.get(pk=attachment_pk)
-    for c in attachment.contents.all():
-        generate_content_voice_embedding_task.delay_on_commit(c.pk)
+    attachment.generate_voice_embeddings()
     return attachment.contents.all().count()
 
 @shared_task
@@ -23,8 +22,13 @@ def populate_attachment_data_task(attachment_pk: int):
     attachment = Attachment.objects.get(pk=attachment_pk)
     attachment.populate()
     index_attachment.delay_on_commit(attachment.pk)
-    return attachment
+    return attachment_pk
 
+@shared_task
+def diarize_attachment_task(attachment_pk: int):
+    attachment = Attachment.objects.get(pk=attachment_pk)
+    attachment.diarize()
+    return attachment_pk
 
 @shared_task
 def index_attachment(attachment_pk: int):

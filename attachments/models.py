@@ -15,6 +15,7 @@ import numpy as np
 # Create your models here.
 
 from celery import group
+from celery.result import allow_join_result
 
 class AttachmentManager(models.Manager):
 
@@ -42,6 +43,9 @@ class AttachmentManager(models.Manager):
 
         attachments = Attachment.objects.bulk_create(
             objects, update_conflicts=True, update_fields=update_fields, unique_fields=unique_fields)
+
+        for attachment in attachments:
+            attachment.index()
 
         i = app.control.inspect()
         reserved = i.reserved()
@@ -173,10 +177,10 @@ class Attachment(models.Model):
 
     def diarize(self):
         from people.models import Voice
-        from people.services import kmeans, kmeans_elbow
+        from people.services import kmeans, kmeans_elbow, join_proximate_embeddings
 
-        ELBOW_THRESHOLD = 0.9
-        DISTANCE_THRESHOLD = 0.2
+        ELBOW_THRESHOLD = 0.95
+        DISTANCE_THRESHOLD = 0.3
         SPEAKER_THRESHOLD = 0.6
 
         lines = list(self.contents.exclude(voice_embedding=None))
@@ -185,8 +189,10 @@ class Attachment(models.Model):
                 [line.voice_embedding for line in lines])
 
             # Get voice clusters
-            best_fit = kmeans_elbow(
-                voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
+            best_fit = kmeans_elbow(voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
+            #best_fit = kmeans(voice_embeddings, threshold=DISTANCE_THRESHOLD)
+            #best_fit = join_proximate_embeddings(voice_embeddings, merge_threshold=DISTANCE_THRESHOLD)
+            #print(len(best_fit))
 
             new_voices = [Voice(voice_embedding=voice_embedding, attachment=self)
                           for voice_embedding in best_fit]
@@ -230,7 +236,8 @@ class Attachment(models.Model):
         if "video_m3u8" in self.json:
             voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in self.contents.all()])
             promise = voice_embedding_task_group()
-            promise.get()
+            with allow_join_result():
+                promise.get()
             self.diarize()
 
     def resegment_transcript(self):
@@ -277,7 +284,8 @@ class Attachment(models.Model):
 
                     voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in modified_contents])
                     promise = voice_embedding_task_group()
-                    promise.get()
+                    with allow_join_result():
+                        promise.get()
                     self.diarize()
 
     def m3u8(self):

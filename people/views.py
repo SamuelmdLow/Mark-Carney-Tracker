@@ -40,8 +40,6 @@ def voices_cluster(request, cluster):
     groups = [[v for v in group if v != None] for group in groups]
     groups = disjoint_sets(groups)
 
-    groups = sorted(groups, key=lambda g: len(g), reverse=True)
-
     try:
         cluster = int(cluster)
     except:
@@ -49,21 +47,36 @@ def voices_cluster(request, cluster):
     if cluster >= len(groups):
         cluster = -1
 
-    group = groups[cluster]
-    group_embeddings = np.array([voice_embeddings[i] for i in group])
-    center = group_embeddings.mean(axis=0)
-    center = center/np.linalg.norm(center)
+    clusters = []
 
-    group = sorted([{
-        "voice": voices[i],
-        "similarity": center @ voice_embeddings[i].T
-    } for i in group], key=lambda v: v["similarity"], reverse=True)
+    for group in groups:
+        group_embeddings = np.array([voice_embeddings[i] for i in group])
+        center = group_embeddings.mean(axis=0)
+        center = center/np.linalg.norm(center)
+
+        group = sorted([{
+            "voice": voices[i],
+            "similarity": center @ voice_embeddings[i].T
+        } for i in group], key=lambda v: v["similarity"], reverse=True)
+
+        avg = np.average([v['similarity'] for v in group])
+
+        def group_name(group):
+            for voice in group:
+                if voice['voice'].person:
+                    return voice['voice'].person.name
+            return f"? ({len(group)})"
+
+        clusters.append({"name": group_name(group), "voices": group, "avg_similarity": avg})
+
+    clusters = sorted(clusters, key=lambda g: (len(g['voices']), g['avg_similarity']), reverse=True)
+
+    group = clusters[cluster]
 
     speakers = list(Person.objects.all())
 
     return render(request, "people/voice-dashboard.html", {
-        "group_range": range(len(groups)),
-        "cluster_count": len([g for g in groups if len(g) > 1]),
+        "clusters": [{'index': i, 'cluster': cluster} for i, cluster in enumerate(clusters)],
         "group": group,
         "speakers": speakers})
 

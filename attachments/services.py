@@ -88,7 +88,7 @@ class M3U8():
         if name:
             audios = list(filter(lambda l: l["NAME"] == f'"{name}"', audios))
         if len(audios) == 0:
-            return None
+            return [], []
 
         floor_audio = audios[0]
         floor_audio_url = self.m3u8_url_base + \
