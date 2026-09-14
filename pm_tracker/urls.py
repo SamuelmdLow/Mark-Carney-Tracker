@@ -26,6 +26,7 @@ from graphene_django.views import GraphQLView
 from schedule_items.views import LocationViewSet, ScheduleItemsViewSet
 from attachments.views import AttachmentViewSet, AttachmentContentViewSet, questionAnswerApi
 from semantic_index.views import SemanticIndexViewSet
+from people.views import PersonViewSet
 
 from people.views import voices_dashboard, voices_cluster, add_voices_to_speaker
 
@@ -35,6 +36,7 @@ router.register(r"schedule_items", ScheduleItemsViewSet)
 router.register(r"attachments", AttachmentViewSet)
 router.register(r"attachment_contents", AttachmentContentViewSet)
 router.register(r"semantic_index", SemanticIndexViewSet)
+router.register(r"person", PersonViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),

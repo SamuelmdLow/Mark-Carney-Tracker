@@ -4,6 +4,7 @@ from attachments.models import Attachment, AttachmentContent
 from attachments.tasks import index_attachment
 from schedule_items.models import Location, ScheduleItem
 from schedule_items.tasks import index_schedule_item
+from people.models import Person
 
 from zoneinfo import ZoneInfo
 
@@ -180,12 +181,20 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
         if previous_html != current_html:
             await AttachmentContent.objects.filter(attachment=attachment).adelete()
 
-            await AttachmentContent.objects.abulk_create([AttachmentContent(
+            contents = [AttachmentContent(
                 data={"text": child.get_text(), "html": child.prettify()},
                 ordering=i,
                 embedding=embedding,
                 attachment=attachment
-            ) for i, (child, embedding) in enumerate(zip(child_elems, embeddings))])
+            ) for i, (child, embedding) in enumerate(zip(child_elems, embeddings))]
+
+            carney = Person.objects.filter(name="Mark Carney").first()
+            if carney and ("https://www.pm.gc.ca/en/news/speeches/" in url or "https://www.pm.gc.ca/en/news/statements/" in url):
+                for content in contents:
+                    content.attribution = carney
+                    content.person_confirmed = True
+
+            await AttachmentContent.objects.abulk_create(contents)
 
             await sync_to_async(index_attachment.delay_on_commit)(attachment.pk)
 

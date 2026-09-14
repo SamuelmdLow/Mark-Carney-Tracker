@@ -11,6 +11,23 @@ from people.services import match_voices, kmeans_elbow, kmeans, disjoint_sets
 import numpy as np
 import json
 
+from rest_framework import permissions, viewsets, filters, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+
+from people.serializers import PersonSerializer
+from people.models import Person
+
+# Create your views here.
+
+class PersonViewSet(viewsets.ModelViewSet):
+    queryset = Person.objects.all()
+    serializer_class = PersonSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ["id", "name"]
+    search_fields = ["name"]
+
 def voices_dashboard(request):
     voices = Voice.objects.all()
     voice_embeddings = np.array([voice.voice_embedding for voice in voices])

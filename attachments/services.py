@@ -1,8 +1,10 @@
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from django.conf import settings
+from django.db.models import F, Value
+from django.db.models.functions import Log, Abs, Extract, Least
+
 from pgvector.django import CosineDistance
-from django.forms.models import model_to_dict
 
 from semantic_index.models import SemanticIndex
 from schedule_items.models import ScheduleItem
@@ -100,7 +102,7 @@ class M3U8():
 
                 clip_marker = 'EXTINF'
                 clips = list(filter(lambda l: l[:len(clip_marker)]
-                               == clip_marker, audio_lines))
+                                    == clip_marker, audio_lines))
 
                 def read_duration(clip):
                     return float(clip.split('\n')[0].split(':')[1].split(',')[0])
@@ -110,7 +112,6 @@ class M3U8():
 
                 clip_urls = [get_url(clip) for clip in clips]
                 clip_durations = [read_duration(clip) for clip in clips]
-                
 
                 return clip_urls, clip_durations
 
@@ -147,7 +148,8 @@ class M3U8():
                     clip_end = dur - seek_end
                     break
 
-        audio_np, batch_durations = audio_urls_to_np(urls, sample_rate=sample_rate, batch_size=batch_size)
+        audio_np, batch_durations = audio_urls_to_np(
+            urls, sample_rate=sample_rate, batch_size=batch_size)
 
         audio_np = audio_np[int(clip_start*sample_rate):len(audio_np) - int(clip_end*sample_rate)]
 
@@ -187,7 +189,8 @@ def transcribe_segment(audio_urls: list[str], initial_prompt, audio_url_batch=1)
 
         return result["transcript"], result["segment_durations"]
 
-    audio, segment_durations = audio_urls_to_np(audio_urls, batch_size=audio_url_batch)
+    audio, segment_durations = audio_urls_to_np(
+        audio_urls, batch_size=audio_url_batch)
     transcription_model = apps.get_app_config(
         'attachments').transcription_model
     transcript = transcribe_audio(
@@ -230,12 +233,14 @@ def resegment_transcript_to_sentences(segments: list[dict]):
                 previous_word = new_segment_words[-1]["word"].strip()
 
             prefixes = "(Mr|St|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|Inc|Ltd|Jr|Sr|Co)[.]"
-            punctuation_split = (len(current_word) > 0 and current_word[0].isupper()) and (len(previous_word) > 0 and not re.search(prefixes, previous_word) and previous_word[-1] in [".", "?"])
+            punctuation_split = (len(current_word) > 0 and current_word[0].isupper()) and (len(
+                previous_word) > 0 and not re.search(prefixes, previous_word) and previous_word[-1] in [".", "?"])
 
             if punctuation_split:
-                
+
                 if new_segment_words[-1]["end"] - new_segment_words[0]["start"] > MAX_DURATION:
-                    resegmented += split_long_duration_words_into_segments(new_segment_words)
+                    resegmented += split_long_duration_words_into_segments(
+                        new_segment_words)
                 else:
                     resegmented.append(words_to_segment(new_segment_words))
 
@@ -252,7 +257,7 @@ def words_to_segment(words):
     text = "".join([w['word'] for w in words]).strip()
     while "  " in text:
         text = text.replace("  ", " ")
-    
+
     return {
         "text": text,
         "words": words,
@@ -267,17 +272,20 @@ def split_long_duration_words_into_segments(all_words):
         words[-1]["word"] = words[-1]["word"] + "..."
     return [words_to_segment(words) for words in words_splits]
 
+
 def split_long_duration_words(words):
     MAX_DURATION = 25
     MIN_WORD_COUNT = 5
 
     if len(words) <= MIN_WORD_COUNT*2 or words[-1]['end']-words[0]['start'] < MAX_DURATION:
         if len(words[0]["word"]) >= 2 and not words[0]["word"][1].isupper():
-            words[0]["word"] = words[0]["word"][0] + words[0]["word"][1:].capitalize()
+            words[0]["word"] = words[0]["word"][0] + \
+                words[0]["word"][1:].capitalize()
         return [words]
 
     gaps = [words[i+1]['end'] - words[i]['start'] for i in range(len(words)-1)]
-    i = MIN_WORD_COUNT + np.argmax(gaps[MIN_WORD_COUNT:len(words)- (MIN_WORD_COUNT)])
+    i = MIN_WORD_COUNT + \
+        np.argmax(gaps[MIN_WORD_COUNT:len(words) - (MIN_WORD_COUNT)])
     if i == 0:
         i = i + 1
     else:
@@ -285,7 +293,6 @@ def split_long_duration_words(words):
             i = i + 1
 
     return split_long_duration_words(words[:i]) + split_long_duration_words(words[i:])
-
 
 
 def audio_urls_to_transcription(urls: list[str], initial_prompt=None, group_size=100, overlap=5) -> list[dict]:
@@ -394,7 +401,8 @@ def segments_to_voice_embed(m3u8, segments, batch_duration=300):
 
     voice_embeddings = []
     for batch in batches:
-        wavs = segments_to_wavs(m3u8.get_audio_np(seek_start=batch[0]['start'], seek_end=batch[-1]['end'])[0], batch, offset=batch[0]['start'])
+        wavs = segments_to_wavs(m3u8.get_audio_np(
+            seek_start=batch[0]['start'], seek_end=batch[-1]['end'])[0], batch, offset=batch[0]['start'])
         voice_embeddings += voice_embed_wavs(wavs)
 
     return voice_embeddings
@@ -407,7 +415,7 @@ def segments_to_wavs(audio, segments, offset=0, sample_rate=16000):
         MIN_DURATION = 1/16
 
         if segment['start'] >= segment['end']:
-            return slice(0,0)
+            return slice(0, 0)
 
         mid = (segment['start'] + segment['end'])/2 - offset
         duration = max(segment['end'] - segment['start'], MIN_DURATION)
@@ -419,6 +427,7 @@ def segments_to_wavs(audio, segments, offset=0, sample_rate=16000):
     wavs = [audio[generate_slice(segment)] for segment in segments]
     return wavs
 
+
 def voice_embed_wavs(wavs):
     classifier = apps.get_app_config('attachments').speaker_model
 
@@ -426,7 +435,8 @@ def voice_embed_wavs(wavs):
     for wav in wavs:
         try:
             unnormalized_embed = classifier.encode_batch(wav)[0][0][:]
-            embeds.append(unnormalized_embed/np.linalg.norm(unnormalized_embed))
+            embeds.append(unnormalized_embed /
+                          np.linalg.norm(unnormalized_embed))
         except Exception as e:
             embeds.append(None)
             print(e)
@@ -523,40 +533,52 @@ def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
 
 
 def questionAnswer(query, person):
-    from attachments.models import AttachmentContent
+    from attachments.models import AttachmentContent, Attachment
     MAX_GAP = 2
     MAX_PASSAGE_DURATION = 240
-    CONSIDERED_PASSAGES = 50
-    ANSWER_THRESHOLD = 0.5
+    CONSIDERED_PASSAGES = 100
+    ANSWER_THRESHOLD = 0.0001
 
     semantic_model = apps.get_app_config('semantic_index').model
     qa_model = apps.get_app_config('attachments').q_and_a_model
 
     query_embed = semantic_model.encode(query)
 
-    core_passages = AttachmentContent.objects.alias(distance=CosineDistance(
-        "embedding", query_embed)).filter(attribution=person).order_by("distance")[:CONSIDERED_PASSAGES]
-    passages_segments = [list(AttachmentContent.objects.filter(attachment=content.attachment, 
+    now = datetime.datetime.now()
+
+    core_passages = AttachmentContent.objects.alias(
+            time_proximity=Abs(
+                Extract(F("attachment__published_at") - now, "epoch")),
+            threshold=Least(0.8, 1/Log(Value(5000), F("time_proximity") + 1))
+        ).annotate(
+            cosine_distance=CosineDistance("embedding", query_embed)) \
+        .filter(attribution=person, cosine_distance__lte=F("threshold")) \
+        .order_by("time_proximity")[:CONSIDERED_PASSAGES]
+
+    print("\n".join([f"{p.cosine_distance} {p.attachment.published_at} {p.attachment.title}\n     {p.data['text']}" for p in core_passages]))
+
+    passages_segments = [list(AttachmentContent.objects.filter(attachment=content.attachment,
                                                                ordering__gt=content.ordering - MAX_PASSAGE_DURATION/2,
-                                                               ordering__lt=content.ordering+MAX_PASSAGE_DURATION/2, 
+                                                               ordering__lt=content.ordering+MAX_PASSAGE_DURATION/2,
                                                                attribution=person)) for content in core_passages]
 
     new_passages = []
     ids = []
     for passage_segments, core_passage in zip(passages_segments, core_passages):
-        gaps = [next.data['start'] - cur.data['end']
-                for cur, next in zip(passage_segments[:-1], passage_segments[1:])]
-        gapThresholds = list(map(lambda g: g > MAX_GAP, gaps))
-
         i = passage_segments.index(core_passage)
-
-        end = len(passage_segments) - i
-        if True in gapThresholds[i:]:
-            end = gapThresholds[i:].index(True) + 1
-
         start = i
-        if True in gapThresholds[:i]:
-            start = list(reversed(gapThresholds[:i])).index(True)
+        end = len(passage_segments) - i
+
+        if 'start' in core_passage.data:
+            gaps = [next.data['start'] - cur.data['end']
+                    for cur, next in zip(passage_segments[:-1], passage_segments[1:])]
+            gapThresholds = list(map(lambda g: g > MAX_GAP, gaps))
+
+            if True in gapThresholds[i:]:
+                end = gapThresholds[i:].index(True) + 1
+
+            if True in gapThresholds[:i]:
+                start = list(reversed(gapThresholds[:i])).index(True)
 
         id = f"{passage_segments[i-start]}-{passage_segments[i+end-1]}"
         if not passage_segments[i-start: i+end] in new_passages:
@@ -628,21 +650,20 @@ def questionAnswer(query, person):
 
         return narrow_responses(new_passages, answers=answers)
 
-    answers = []
-    for passage, score in narrow_responses(new_passages):
+    passageScores = [(passage, score) for passage, score in narrow_responses(new_passages) if score > ANSWER_THRESHOLD]
 
-        if score > ANSWER_THRESHOLD:
-            attachment = passage[0].attachment
-            answers.append({
-                "passage": segements_to_text(passage),
-                "attachment": model_to_dict(attachment),
-                "time": attachment.published_at,
-                "score": score})
+    answers = []
+    for passage, score in passageScores:
+        attachment = passage[0].attachment
+        answers.append({
+            "passage": passage,
+            "attachment": attachment,
+            "time": attachment.published_at,
+            "score": score})
 
     answers = sorted(answers, key=lambda a: a["time"], reverse=True)
 
     return answers
-
 
 # CPAC Attachments
 

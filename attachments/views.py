@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.forms.models import model_to_dict
 from rest_framework import permissions, viewsets, filters, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -32,6 +33,12 @@ def questionAnswerApi(request, person_id):
     person = Person.objects.filter(id=person_id).first()
     if person and query:
         answers = questionAnswer(query, person)
+
+        answers = [answer | {
+            "passage": " ".join([c.data['text'] for c in answer['passage']]),
+            "attachment": model_to_dict(answer['attachment'])
+            } for answer in answers]
+
         return Response(data=answers, status=status.HTTP_200_OK)
 
     return Response(status=status.HTTP_404_NOT_FOUND)
