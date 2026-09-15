@@ -532,7 +532,7 @@ def resegment_body_for_embedding(segments, min_segment_length=15) -> list[str]:
     return segmented_texts
 
 
-def questionAnswer(query, person):
+def questionAnswer(query, person, target_date):
     from attachments.models import AttachmentContent, Attachment
     MAX_GAP = 2
     MAX_PASSAGE_DURATION = 240
@@ -544,11 +544,14 @@ def questionAnswer(query, person):
 
     query_embed = semantic_model.encode(query)
 
-    now = datetime.datetime.now()
+    if target_date:
+        target_date = datetime.datetime.fromisoformat(target_date)
+    else:
+        target_date = datetime.datetime.now()
 
     core_passages = AttachmentContent.objects.alias(
             time_proximity=Abs(
-                Extract(F("attachment__published_at") - now, "epoch")),
+                Extract(F("attachment__published_at") - target_date, "epoch")),
             threshold=Least(0.8, 1/Log(Value(5000), F("time_proximity") + 1))
         ).annotate(
             cosine_distance=CosineDistance("embedding", query_embed)) \

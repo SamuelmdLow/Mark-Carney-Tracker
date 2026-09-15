@@ -30,9 +30,10 @@ class AttachmentContentViewSet(viewsets.ModelViewSet):
 @permission_classes([permissions.AllowAny])
 def questionAnswerApi(request, person_id):
     query = request.GET.get('q', None)
+    target_date = request.GET.get('date', None)
     person = Person.objects.filter(id=person_id).first()
     if person and query:
-        answers = questionAnswer(query, person)
+        answers = questionAnswer(query, person, target_date=target_date)
 
         answers = [answer | {
             "passage": " ".join([c.data['text'] for c in answer['passage']]),
