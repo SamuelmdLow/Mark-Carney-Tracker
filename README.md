@@ -1,10 +1,14 @@
-# Mark Carney Tracker
-The purpose of this project is to make the activities and statements of the Prime Minister easier to follow and search.
+# Mark Carney Tracker - [pmlog.ca](https://pmlog.ca/)
+This project parses the Prime Minister's press releases from [pm.gc.ca](https://www.pm.gc.ca/en/) and transcribes and diarizes press conferences from [CPAC](https://www.cpac.ca/). All of the content is indexed with an embedding to allow for semantic search.
 
-## What it does
-The project parses the Prime Minister's media advisory pages and saves their information in its database. Videos from cpac.ca which are deemed relevant to an item in his schedule are transcribed and also saved in the database. Everything is then indexed with an embedding to allow for semantic search.
-
-The information can be accessed, filtered, and searched using a REST api or with GraphQL.
+Through this data, journalists can follow the Prime Minister's activities in real time and trace their history of remarks on any subject. The information can be accessed, filtered, and searched using a [REST API](https://pmlog.ca/api/), [GraphQL](https://pmlog.ca/graphql) or [MCP](https://pmlog.ca/mcp).
 
 ## Tech stack
-The database is Postgres and Django is the web framework. Celery is used for background tasks with Redis responsible for task queues. Whisper is used for transcription and all-MiniLM-L6-v2 is the embedding model used for semantic search.
+* Containerization: Docker
+* Web framework: Django
+* Database: Postgres
+* Distributed task queue: Celery
+* Broker: Redis
+* Transcription model: [Whisper](https://huggingface.co/openai/whisper-small)
+* Diarization model: [Speaker Verification with ECAPA-TDNN embeddings on Voxceleb](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb)
+* Semantic embeddings model: [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
