@@ -188,7 +188,7 @@ async def pm_website_create_schedule_items_from_page(id: int, session: aiohttp.C
                 attachment=attachment
             ) for i, (child, embedding) in enumerate(zip(child_elems, embeddings))]
 
-            carney = Person.objects.filter(name="Mark Carney").first()
+            carney = await Person.objects.filter(name="Mark Carney").afirst()
             if carney and ("https://www.pm.gc.ca/en/news/speeches/" in url or "https://www.pm.gc.ca/en/news/statements/" in url):
                 for content in contents:
                     content.attribution = carney

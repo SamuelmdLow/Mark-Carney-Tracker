@@ -742,7 +742,8 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                     terms = ["PM Carney", "PM Mark Carney"]
                     if any([title[:len(term)] == term for term in terms]):
                         content = description
-                        content_split = content.split(". ")
+                        
+                        content_split = content.replace("\r", " ").split(". ")
 
                         for i in range(1, len(content_split)):
                             if len(content_split[i]) > 0 and (content_split[i][0].isupper() or not content_split[i][0].isalpha()):
@@ -757,6 +758,8 @@ async def cpac_page_to_attachment(url: str) -> (None | Attachment):
                         else:
                             if attachment:
                                 attachment_datetime = attachment.published_at
+                            print(content_split)
+                            print(f"{content} {len(content)} {response.url} {len(str(response.url))}")
                             schedule_item = await ScheduleItem.objects.acreate(
                                 content=content,
                                 datetime=attachment_datetime,
@@ -856,10 +859,16 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                 if any([term in url.find("loc").text for term in blacklist_terms]):
                     return False
 
-                matching_attachment = await Attachment.objects.filter(source=url.find("loc").text).afirst()
+                query = url.find("loc").text.split("?")[-1]
+                matching_attachment = await Attachment.objects.filter(source__endswith=query).afirst()
+                #matching_attachment = await Attachment.objects.filter(source=url.find("loc").text).afirst()
                 if matching_attachment:
-                    if not "https://cpac-ca-live.cdn.vustreams.com/groupa/live/" in matching_attachment.json['video_m3u8']:
-                        return False
+                    if "https://cpac-ca-live.cdn.vustreams.com/groupa/live/" in matching_attachment.json['video_m3u8']:
+                        return True
+                    if matching_attachment.source != url.find("loc").text:
+                        return True
+                else:
+                    False
 
                 necessary_terms = ["carney", "headline-politics"]
 
@@ -892,9 +901,13 @@ async def cpac_sitemap_get_relevant_urls(sitemap_url: str, cutoff_time: datetime
                 return False
 
             def extract_url_info(url):
-                return url.find("loc").text
+                url_text = url.find("loc").text
+                en_url = url.find("xhtml:link", {"hreflang": "en"})
+                if en_url:
+                    return en_url["href"]
+                return url_text
 
-            relevant_urls = [extract_url_info(url) async for url in async_filter(relevant_url, urls)]
+            relevant_urls = set([extract_url_info(url) async for url in async_filter(relevant_url, urls)])
             print(
                 f"{sitemap_url}\n     - {len(relevant_urls)} potentially relevant urls")
             return relevant_urls

@@ -38,8 +38,15 @@ class AttachmentManager(models.Manager):
 
             return duration_change
 
+        def exclude_populate(attachment):
+            if "video_m3u8" in attachment.json and "https://cpac-ca-live.cdn.vustreams.com/groupa/live/" in attachment.json["video_m3u8"]:
+                return True
+            return False
+
         changes = [identify_relevant_changes(
             original, attachment) for attachment, original in zip(objects, originals)]
+
+        excluded = [exclude_populate(attachment) for attachment in objects]
 
         attachments = Attachment.objects.bulk_create(
             objects, update_conflicts=True, update_fields=update_fields, unique_fields=unique_fields)
@@ -59,7 +66,7 @@ class AttachmentManager(models.Manager):
                         reserved_args.append(task['args'][0])
 
         for attachment, change in zip(attachments, changes):
-            if not attachment.pk in reserved_args and change:
+            if not attachment.pk in reserved_args and change and not excluded:
                 populate_attachment_data_task.delay_on_commit(attachment.pk)
 
         return attachments
@@ -153,6 +160,7 @@ class Attachment(models.Model):
 
             AttachmentContent.objects.bulk_create(contents)
 
+            self.index()
             self.generate_voice_embeddings()
 
         self.save()
@@ -234,10 +242,13 @@ class Attachment(models.Model):
         from attachments.tasks import generate_content_voice_embedding_task
 
         if "video_m3u8" in self.json:
-            voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in self.contents.all()])
-            promise = voice_embedding_task_group()
-            with allow_join_result():
-                promise.get()
+            #voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in self.contents.all()])
+            #promise = voice_embedding_task_group()
+            #with allow_join_result():
+            #    promise.get()
+            
+            for content in self.contents.all():
+                content.generate_voice_embedding()
             self.diarize()
 
     def resegment_transcript(self):
@@ -282,10 +293,9 @@ class Attachment(models.Model):
                     AttachmentContent.objects.filter(attachment=self).exclude(
                         ordering__in=[resegment["start"] for resegment in resegments]).delete()
 
-                    voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in modified_contents])
-                    promise = voice_embedding_task_group()
-                    with allow_join_result():
-                        promise.get()
+                    for content in modified_contents:
+                        content.generate_voice_embedding()
+                    
                     self.diarize()
 
     def m3u8(self):
@@ -330,8 +340,18 @@ class AttachmentContent(models.Model):
         import torch
 
         try:
+            duration = self.data['end'] - self.data['start']
+            start = self.data['start']
+            end = start + min(duration, 30)
+
+            if duration <= 0:
+                return
+
+            if duration > 30:
+                print(f"Skipped last {duration-30}s\n     {self.data['text']}")
+            
             audio = self.attachment.audio(
-                seek_start=self.data['start'], seek_end=self.data['end'])
+                seek_start=start, seek_end=end)
             if type(audio) != type(None):
                 classifier = apps.get_app_config('attachments').speaker_model
 

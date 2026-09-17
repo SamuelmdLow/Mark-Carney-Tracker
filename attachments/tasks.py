@@ -21,7 +21,6 @@ def generate_content_voice_embedding_task(attachment_content_pk: int):
 def populate_attachment_data_task(attachment_pk: int):
     attachment = Attachment.objects.get(pk=attachment_pk)
     attachment.populate()
-    index_attachment.delay_on_commit(attachment.pk)
     return attachment_pk
 
 @shared_task
