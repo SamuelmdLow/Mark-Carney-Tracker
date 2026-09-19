@@ -11,11 +11,13 @@ from pgvector.django import VectorField, CosineDistance
 from semantic_index.models import SemanticIndex
 
 import numpy as np
+import datetime
 
 # Create your models here.
 
 from celery import group
 from celery.result import allow_join_result
+
 
 class AttachmentManager(models.Manager):
 
@@ -28,13 +30,13 @@ class AttachmentManager(models.Manager):
         originals = [Attachment.objects.filter(
             id=ob.id).first() for ob in objects]
 
-        def identify_relevant_changes(a_1, a_2):
+        def identify_relevant_changes(original, new):
             # Identify if changes warrant running populate in the attachment
-            if not a_1 or not a_2:
+            if not original or not new:
                 return True
 
-            duration_change = ("video_duration" in a_1.json and not "video_duration" in a_2.json) or (
-                not "video_duration" in a_1.json and "video_duration" in a_2.json) or (a_1.json["video_duration"] != a_2.json["video_duration"])
+            duration_change = ("video_duration" in original.json and not "video_duration" in new.json) or (
+                not "video_duration" in original.json and "video_duration" in new.json) or (original.json["video_duration"] != new.json["video_duration"])
 
             return duration_change
 
@@ -133,13 +135,19 @@ class Attachment(models.Model):
                 content_object=self,
             ) for (text, embedding, label) in list(zip(text_segments, embeddings, labels))])
 
-    def scoreContent(self, query):
+    def getContents(self, query=None):
         model = apps.get_app_config('semantic_index').model
-        query_embedding = model.encode(query)
+
+        if query:
+            query_embedding = model.encode(query)
+            return list(self.contents.all()
+                        .annotate(score=1-CosineDistance('embedding', query_embedding))
+                        .order_by("ordering")
+                        .values("data", "score", "attribution_id", "attribution__name", "attribution_confirmed", "voice_id"))
+
         return list(self.contents.all()
-                    .annotate(score=1-CosineDistance('embedding', query_embedding))
                     .order_by("ordering")
-                    .values("data", "score", "attribution_id", "attribution__name", "attribution_confirmed", "voice_id"))
+                    .values("data", "attribution_id", "attribution__name", "attribution_confirmed", "voice_id"))
 
     def populate(self):
         data = self.json
@@ -160,10 +168,13 @@ class Attachment(models.Model):
 
             AttachmentContent.objects.bulk_create(contents)
 
+            data["transcribed_at"] = datetime.datetime.strftime(
+                "%Y-%m-%d %H:%M")
+            self.save()
+
             self.index()
             self.generate_voice_embeddings()
 
-        self.save()
         return self
 
     def transcribe(self, group_size=100):
@@ -197,10 +208,11 @@ class Attachment(models.Model):
                 [line.voice_embedding for line in lines])
 
             # Get voice clusters
-            best_fit = kmeans_elbow(voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
-            #best_fit = kmeans(voice_embeddings, threshold=DISTANCE_THRESHOLD)
-            #best_fit = join_proximate_embeddings(voice_embeddings, merge_threshold=DISTANCE_THRESHOLD)
-            #print(len(best_fit))
+            best_fit = kmeans_elbow(
+                voice_embeddings, elbow_threshold=ELBOW_THRESHOLD, distance_threshold=DISTANCE_THRESHOLD)
+            # best_fit = kmeans(voice_embeddings, threshold=DISTANCE_THRESHOLD)
+            # best_fit = join_proximate_embeddings(voice_embeddings, merge_threshold=DISTANCE_THRESHOLD)
+            # print(len(best_fit))
 
             new_voices = [Voice(voice_embedding=voice_embedding, attachment=self)
                           for voice_embedding in best_fit]
@@ -242,11 +254,11 @@ class Attachment(models.Model):
         from attachments.tasks import generate_content_voice_embedding_task
 
         if "video_m3u8" in self.json:
-            #voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in self.contents.all()])
-            #promise = voice_embedding_task_group()
-            #with allow_join_result():
+            # voice_embedding_task_group = group([generate_content_voice_embedding_task.s(content.pk) for content in self.contents.all()])
+            # promise = voice_embedding_task_group()
+            # with allow_join_result():
             #    promise.get()
-            
+
             for content in self.contents.all():
                 content.generate_voice_embedding()
             self.diarize()
@@ -289,13 +301,13 @@ class Attachment(models.Model):
                         content.embedding = embedding
 
                     modified_contents = AttachmentContent.objects.bulk_create(modified_contents, update_conflicts=True, update_fields=[
-                                                          'data', 'embedding', 'voice_embedding'], unique_fields=['id'])
+                        'data', 'embedding', 'voice_embedding'], unique_fields=['id'])
                     AttachmentContent.objects.filter(attachment=self).exclude(
                         ordering__in=[resegment["start"] for resegment in resegments]).delete()
 
                     for content in modified_contents:
                         content.generate_voice_embedding()
-                    
+
                     self.diarize()
 
     def m3u8(self):
@@ -349,7 +361,7 @@ class AttachmentContent(models.Model):
 
             if duration > 30:
                 print(f"Skipped last {duration-30}s\n     {self.data['text']}")
-            
+
             audio = self.attachment.audio(
                 seek_start=start, seek_end=end)
             if type(audio) != type(None):
@@ -363,7 +375,8 @@ class AttachmentContent(models.Model):
                 voice_embed = classifier.encode_batch(wav)[0][0][:]
                 print(
                     f"{datetime.datetime.now()-audio_start} {dur}\n     {self.data['text']}")
-                self.voice_embedding = voice_embed / np.linalg.norm(voice_embed)
+                self.voice_embedding = voice_embed / \
+                    np.linalg.norm(voice_embed)
                 self.save()
         except Exception as e:
             print(e)

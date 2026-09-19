@@ -44,7 +44,7 @@ def cpac_create_from_url_task(url: str, populate:bool=True):
         index_attachment.delay_on_commit(attachment.pk)
         if populate:
             populate_attachment_data_task.delay_on_commit(attachment.pk)
-        return attachment
+        return attachment.id
     return None
 
 
