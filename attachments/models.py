@@ -38,7 +38,9 @@ class AttachmentManager(models.Manager):
             duration_change = ("video_duration" in original.json and not "video_duration" in new.json) or (
                 not "video_duration" in original.json and "video_duration" in new.json) or (original.json["video_duration"] != new.json["video_duration"])
 
-            return duration_change
+            m3u8_change = (original.json["video_m3u8"] if "video_m3u8" in original.json else None) != (new.json["video_m3u8"] if "video_m3u8" in new.json else None)
+
+            return duration_change or m3u8_change
 
         def exclude_populate(attachment):
             if "video_m3u8" in attachment.json and "https://cpac-ca-live.cdn.vustreams.com/groupa/live/" in attachment.json["video_m3u8"]:
