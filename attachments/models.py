@@ -170,7 +170,7 @@ class Attachment(models.Model):
 
             AttachmentContent.objects.bulk_create(contents)
 
-            data["transcribed_at"] = datetime.datetime.strftime(
+            data["transcribed_at"] = datetime.datetime.now().strftime(
                 "%Y-%m-%d %H:%M")
             self.save()
 
