@@ -22,6 +22,10 @@ app.conf.beat_schedule = {
         'task': 'schedule_items.tasks.pm_website_scrape_recent_task',
         'schedule': crontab(hour='*/6'),
     },
+    'scrape_parl_votes': {
+        'task': 'attachments.tasks.parl_scrape_votes',
+        'schedule': crontab(hour='*/6'),
+    },
     'scrape_cpac': {
         'task': 'attachments.tasks.cpac_scrape_recent_task',
         'schedule': crontab(minute='*/30'),

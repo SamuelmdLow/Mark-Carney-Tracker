@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
-from schedule_items.services import pm_website_create_all
+from attachments.services_pmgc import pm_website_create_all
 from asgiref.sync import async_to_sync
 
 class Command(BaseCommand):

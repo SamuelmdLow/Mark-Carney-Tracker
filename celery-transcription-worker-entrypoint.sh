@@ -1,1 +1,1 @@
-celery -A pm_tracker worker -Q transcription --concurrency=3
+celery -A pm_tracker worker -Q transcription --concurrency=1

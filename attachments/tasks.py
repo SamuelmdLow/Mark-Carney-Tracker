@@ -37,7 +37,7 @@ def index_attachment(attachment_pk: int):
 
 @shared_task
 def cpac_create_from_url_task(url: str, populate:bool=True):
-    from attachments.services import cpac_page_to_attachment
+    from attachments.services_cpac import cpac_page_to_attachment
     attachment = async_to_sync(cpac_page_to_attachment)(url)
     if attachment:
         attachment.save()
@@ -50,11 +50,17 @@ def cpac_create_from_url_task(url: str, populate:bool=True):
 
 @shared_task
 def cpac_scrape_recent_task():
-    from attachments.services import cpac_scrape_recent
+    from attachments.services_cpac import cpac_scrape_recent
     return async_to_sync(cpac_scrape_recent)()
 
 
 @shared_task
 def cpac_scrape_all_task():
-    from attachments.services import cpac_scrape_all
+    from attachments.services_cpac import cpac_scrape_all
     return async_to_sync(cpac_scrape_all)()
+
+
+@shared_task
+def parl_scrape_votes():
+    from attachments.services_parl import read_votes
+    return async_to_sync(read_votes)()

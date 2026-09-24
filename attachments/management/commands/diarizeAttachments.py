@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 from attachments.models import Attachment
-from attachments.services import cpac_update_all
+from attachments.services_cpac import cpac_update_all
 from people.services import group_voices_into_speakers_by_proximity
 from asgiref.sync import async_to_sync, sync_to_async
 import asyncio

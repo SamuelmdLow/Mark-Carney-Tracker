@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
-from attachments.services import cpac_update_all
+from attachments.services_cpac import cpac_update_all
 from asgiref.sync import async_to_sync
 
 class Command(BaseCommand):

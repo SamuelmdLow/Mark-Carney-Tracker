@@ -50,8 +50,8 @@ class AttachmentManager(models.Manager):
         changes = [identify_relevant_changes(
             original, attachment) for attachment, original in zip(objects, originals)]
 
-        excluded = [exclude_populate(attachment) for attachment in objects]
-
+        excludes = [exclude_populate(attachment) for attachment in objects]
+        
         attachments = Attachment.objects.bulk_create(
             objects, update_conflicts=True, update_fields=update_fields, unique_fields=unique_fields)
 
@@ -69,7 +69,7 @@ class AttachmentManager(models.Manager):
                     if task['name'] == "attachments.tasks.populate_attachment_data_task":
                         reserved_args.append(task['args'][0])
 
-        for attachment, change in zip(attachments, changes):
+        for attachment, change, excluded in zip(attachments, changes, excludes):
             if not attachment.pk in reserved_args and change and not excluded:
                 populate_attachment_data_task.delay_on_commit(attachment.pk)
 

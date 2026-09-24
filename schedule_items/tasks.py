@@ -10,5 +10,5 @@ def index_schedule_item(schedule_item_pk):
 
 @shared_task
 def pm_website_scrape_recent_task():
-    from schedule_items.services import pm_website_scrape_recent
+    from attachments.services_pmgc import pm_website_scrape_recent
     return async_to_sync(pm_website_scrape_recent)()
