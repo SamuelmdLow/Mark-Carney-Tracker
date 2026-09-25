@@ -1,4 +1,3 @@
-from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
 from django.conf import settings
 from django.db.models import F, Value
@@ -6,14 +5,9 @@ from django.db.models.functions import Log, Abs, Extract, Least
 
 from pgvector.django import CosineDistance
 
-from semantic_index.models import SemanticIndex
-from schedule_items.models import ScheduleItem
-from attachments.models import Attachment
-
 from audio.shared.services import transcribe_audio, audio_urls_to_np
 
 import aiohttp
-import asyncio
 from asgiref.sync import async_to_sync, sync_to_async
 import datetime
 import copy
@@ -21,7 +15,6 @@ import itertools
 import re
 import json
 
-from bs4 import BeautifulSoup
 import numpy as np
 import boto3
 import botocore
